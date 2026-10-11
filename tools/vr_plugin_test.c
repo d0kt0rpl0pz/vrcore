@@ -486,6 +486,25 @@ static int run_once(const char *bundle, const char *roms, double secs, const cha
     SYM(istats, "vr_interp_stats") SYM(vfloats, "vr_vertex_floats") SYM(game, "vr_game")
     SYM(ntables, "vr_table_count") SYM(table_size, "vr_table_size")
     if (api.version() != VR_ABI_VERSION) { fprintf(stderr, "the plugin's ABI is %d, this test's %d\n", api.version(), VR_ABI_VERSION); return 1; }
+    if (pass == 1) {                                     /* the optional exports: each one there, well formed */
+        const char *(*roms)(void) = (const char *(*)(void))dlsym(h, "vr_roms");
+        int files = 0, bad = 0;
+        for (const char *l = roms ? roms() : NULL; l && *l; files++) {     /* name\tsize\tcrc32 a line */
+            const char *e = strchr(l, '\n');
+            const size_t n = e ? (size_t)(e - l) : strlen(l);
+            const char *t1 = memchr(l, '\t', n);
+            const char *t2 = t1 ? memchr(t1 + 1, '\t', n - (size_t)(t1 + 1 - l)) : NULL;
+            char *end = NULL;
+            int ok = t1 && t2 && t1 > l;                /* a name, the size in decimal, the CRC-32 in hex */
+            if (ok) { strtoll(t1 + 1, &end, 10); ok = end == t2 && end > t1 + 1; }
+            if (ok) { strtoul(t2 + 1, &end, 16); ok = end == l + n && end > t2 + 1; }
+            bad += !ok;
+            l += n + (e != NULL);
+        }
+        if (roms) printf("vr_roms: %d files%s\n", files, bad ? ", MALFORMED" : "");
+        else printf("vr_roms: none (optional)\n");
+        if (bad) { fprintf(stderr, "vr_roms: %d lines not name, decimal size, hex CRC\n", bad); return 1; }
+    }
     VF = api.vfloats();
     if (VF < VF_SHARED) { fprintf(stderr, "the plugin's vertex is %d floats, fewer than the %d shared\n", VF, VF_SHARED); return 1; }
     rr = !strcmp(api.game(), "raverace");

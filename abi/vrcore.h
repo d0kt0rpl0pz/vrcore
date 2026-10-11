@@ -167,6 +167,16 @@ VR_API void vr_stats(uint32_t *frame, uint32_t *c0, uint32_t *c1, uint32_t *c2);
  * matched, snaps by the caller, the camera's move, its turn, too few matches */
 VR_API void vr_interp_stats(double out[9]);
 
+/* ---- optional exports ---------------------------------------------------- *
+ * A plugin may leave these out: the host binds each one it finds and does without the rest,
+ * so leaving one out is never an error and needs no new VR_ABI_VERSION. */
+
+/* The files the game's ROM set needs, one a line, "name\tsize\tcrc32\n" (size in decimal
+ * bytes, the CRC-32 in hex), static and ready before vr_start. The host checks a set
+ * against it, says what is missing, and takes the files the player picks (host/app/roms.h).
+ * Left out: the host does not look into the set and the game says what is wrong with it. */
+VR_API const char *vr_roms(void);
+
 #ifdef __cplusplus
 }
 #endif

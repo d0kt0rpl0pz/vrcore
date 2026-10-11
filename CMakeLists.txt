@@ -120,13 +120,17 @@ set(VRCORE_SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 # Vulkan call goes through volk (VK_NO_PROTOTYPES), loaded at run time.
 add_library(vrcore_host STATIC
     host/app/app.cpp
+    host/app/headset.cpp
     host/app/input.cpp
     host/app/log.cpp
     host/app/pacing.cpp
     host/app/pads.cpp
     host/app/picker_test.cpp
     host/app/plugin.cpp
+    host/app/roms.cpp
+    host/app/selftest.cpp
     host/app/settings.cpp
+    host/app/soak.cpp
     host/audio/audio.cpp
     host/audio/spatial.cpp
     host/rig/rig.cpp
@@ -140,6 +144,7 @@ add_library(vrcore_host STATIC
     host/gpu/eye_target.cpp
     host/gpu/render.cpp
     host/gpu/vk_impl.cpp
+    host/ui/graphics.cpp
     host/ui/imgui_render.cpp
     host/ui/menu.cpp
     host/ui/pick.cpp

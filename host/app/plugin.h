@@ -18,8 +18,8 @@
 namespace vrcore {
 
 struct Plugin {
-    // Opens `name` (above) and binds every ABI 1 function; false and `error` when the binary is missing,
-    // lacks one, or speaks another VR_ABI_VERSION.
+    // Opens `name` (above) and binds every ABI 1 function, and the optional exports it has; false and `error` when
+    // the binary is missing, lacks a required one, or speaks another VR_ABI_VERSION.
     bool open(const char *name, std::string &error);
     // A game's own function by name (null: the plugin has none).
     void *bind(const char *name) const;
@@ -57,6 +57,8 @@ struct Plugin {
     int (*get_option)(int key) = nullptr;
     void (*stats)(uint32_t *frame, uint32_t *c0, uint32_t *c1, uint32_t *c2) = nullptr;
     void (*interp_stats)(double out[9]) = nullptr;
+    // The optional exports, bound when the plugin has them (null: it has not).
+    const char *(*roms)(void) = nullptr;
 
 private:
     bool fail(void *h);

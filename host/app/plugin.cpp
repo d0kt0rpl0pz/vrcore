@@ -186,11 +186,13 @@ bool Plugin::open(const char *name, std::string &error)
         error = path + " has no " + missing;
         return fail(h);
     }
+    roms = reinterpret_cast<const char *(*)(void)>(dlsym(h, "vr_roms"));     // optional
     // remembered only once it passed every check: a handle fail() closed is never copied from
     if (!first) opened.push_back({path, h});
     handle_ = h;
     path_ = path;
-    log("plugin: %s (%s), vrcore %d, %d floats a vertex", path.c_str(), game(), v, vertex_floats());
+    log("plugin: %s (%s), vrcore %d, %d floats a vertex%s", path.c_str(), game(), v, vertex_floats(),
+        roms ? ", vr_roms" : "");
     return true;
 }
 

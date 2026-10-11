@@ -45,8 +45,11 @@ objects from frame to frame for drawing between game frames) and `vr_level` (tak
 camera for comfort and so you don't throw up).
 
 **`host/`** is game-agnostic; a game's front fills its hooks. `app/plugin.h` (plugin loader), `app/pacing.h`
-(render clock), `rig/` (seat, free camera, wheel, stick, shifter, rumble), `ui/menu.h` (menus, the file picker),
-`xr/` (OpenXR session, refresh, foveation and resolution), `audio/` (sound and spatial speakers).
+(render clock), `app/selftest.h` and `app/soak.h` (the timed self test and the soak test, with a front's hooks),
+`app/roms.h` (the ROM set checked against the optional `vr_roms`, its panel texts and the picked
+files), `app/headset.h` (which headset, its refresh rates), `rig/` (seat, free camera, wheel, stick, shifter,
+rumble), `ui/menu.h` (menus, the file picker), `ui/graphics.h` (the headset's Graphics rows and profiles), `xr/`
+(OpenXR session, refresh, foveation and resolution), `audio/` (sound and spatial speakers).
 
 ## Using it
 
@@ -69,7 +72,7 @@ A game uses it in three places:
 
 A change to `abi/vrcore.h` must be made in `host/app/plugin.h` and `tools/vr_plugin_test.c` at the same time,
 and every game has to be rebuilt afterwards. `VR_ABI_VERSION` is bumped only when an existing call or float offset
-changes.
+changes; a new optional export (the header's last section) needs no bump, since a plugin without it still loads.
 
 ## Checks
 
