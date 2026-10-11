@@ -255,11 +255,15 @@ std::string adopt(const std::string &uri, const std::string &name, std::string &
     SDL_IOStream *io = SDL_IOFromFile(uri.c_str(), "rb");
     if (!io) return "Could not open " + name + ".";
     bool zip = zip_files(io, z);
+    // a 7z by its signature, or by its name: a picked file's name can be a media id with no extension
+    uint8_t head[6] = {};
+    bool seven = !zip && SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) == 0 && SDL_ReadIO(io, head, 6) == 6 &&
+                 !SDL_memcmp(head, "7z\xbc\xaf\x27\x1c", 6);
     SDL_CloseIO(io);
     if (!zip) {
         size_t n = name.size();
-        if (!s.seven_z || n < 3 || SDL_strcasecmp(name.c_str() + n - 3, ".7z"))
-            return name + " is not a zip file, or is damaged.";
+        if (!seven && n >= 3 && !SDL_strcasecmp(name.c_str() + n - 3, ".7z")) seven = true;
+        if (!s.seven_z || !seven) return name + " is not a zip file, or is damaged.";
         dest = g.where + "/" + s.seven_z;
         return std::string();
     }

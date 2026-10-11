@@ -19,7 +19,7 @@ bool g_busy = false, g_done = false;
 std::vector<Pick> g_picks;
 std::string g_error;
 
-// the URI's last part, %-decoded: "content://.../document/primary%3ADownload%2Fdaytona93.zip" -> daytona93.zip
+// the URI's last part, %-decoded (Android: when the provider gives no name): "content://.../document/primary%3ADownload%2Fdaytona93.zip" -> daytona93.zip
 std::string name_of(const char *uri)
 {
     std::string d;
@@ -38,6 +38,34 @@ std::string name_of(const char *uri)
 }
 
 #ifdef __ANDROID__
+// the provider's own name for the file (VrcoreActivity.displayName); empty: none
+std::string display_name(const char *uri)
+{
+    JNIEnv *env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    jobject act = static_cast<jobject>(SDL_GetAndroidActivity());
+    if (!env || !act) return std::string();
+    std::string out;
+    jclass c = env->GetObjectClass(act);
+    jmethodID m = env->GetMethodID(c, "displayName", "(Ljava/lang/String;)Ljava/lang/String;");
+    jstring u = env->NewStringUTF(uri);
+    jstring r = m && u ? static_cast<jstring>(env->CallObjectMethod(act, m, u)) : nullptr;
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        r = nullptr;
+    }
+    if (r) {
+        const char *s = env->GetStringUTFChars(r, nullptr);
+        if (s) out = s;
+        env->ReleaseStringUTFChars(r, s);
+        env->DeleteLocalRef(r);
+    }
+    if (u) env->DeleteLocalRef(u);
+    env->DeleteLocalRef(c);
+    env->DeleteLocalRef(act);
+    return out;
+}
+
 void back_to_vr()
 {
     JNIEnv *env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
@@ -62,7 +90,14 @@ void SDLCALL on_pick(void *, const char *const *files, int)
     std::string error;
     if (!files) error = std::string("The file picker failed: ") + SDL_GetError();
     else
-        for (const char *const *f = files; *f; ++f) picks.push_back({*f, name_of(*f)});
+        for (const char *const *f = files; *f; ++f) {
+            std::string n;
+#ifdef __ANDROID__
+            n = display_name(*f);
+#endif
+            picks.push_back({*f, n.empty() ? name_of(*f) : n});
+            log("ui: pick: %s", picks.back().name.c_str());
+        }
     log("ui: pick: %zu file(s)%s%s", picks.size(), error.empty() ? "" : ": ", error.c_str());
     {
         std::lock_guard<std::mutex> l(g_lock);

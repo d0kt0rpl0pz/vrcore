@@ -3,6 +3,8 @@ package com.doktorplopz.vrcore.host;
 import java.util.ArrayList;
 
 import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -20,6 +22,9 @@ import org.libsdl.app.SDLActivity;
  * the app is started again here, with the intent the Library uses (the running instance comes to the front): 0.7 s
  * after the result, while the panel is still closing, then every 1.5 s until the activity has the window focus,
  * 4 times at most.
+ *
+ * A PICKED FILE'S NAME (displayName, called by ui/pick.cpp): the picker's URI may hold only a media id
+ * (content://.../1000000640), so the name is the provider's DISPLAY_NAME; null when it has none.
  */
 public class VrcoreActivity extends SDLActivity {
     @Override
@@ -49,6 +54,17 @@ public class VrcoreActivity extends SDLActivity {
         }
         if (inWord) out.add(word.toString());
         return out.toArray(new String[0]);
+    }
+
+    // A PICKED FILE'S NAME: from any thread
+    public String displayName(String uri) {
+        try (Cursor c = getContentResolver().query(Uri.parse(uri),
+                new String[] {android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst() && !c.isNull(0)) return c.getString(0);
+        } catch (Exception e) {
+            Log.w("vrcore", "no name for the picked file", e);
+        }
+        return null;
     }
 
     // BACK INTO VR: from any thread

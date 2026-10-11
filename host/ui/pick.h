@@ -18,7 +18,7 @@ namespace vrcore::ui {
 
 struct Pick {
     std::string uri;            // what SDL_IOFromFile opens
-    std::string name;           // the file's name, for the player (the URI's last part)
+    std::string name;           // the file's name, for the player (Android: the provider's, else the URI's last part)
 };
 
 // Opens the picker; false: it could not be opened, or one is open already.
