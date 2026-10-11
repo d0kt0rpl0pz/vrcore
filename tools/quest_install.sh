@@ -4,7 +4,7 @@
 # app unpacks it on first start -- ROMs stay on the headset, never in the APK or git), start
 # it, and show its log.
 #   log_tag ...   logcat filter specs (default: vrcore:I, the host's tag)
-#   VR_ACTIVITY   the app's activity (default: vrcore's, com.doktorplopz.letsgoaway.host.LetsGoAwayActivity)
+#   VR_ACTIVITY   the app's activity (default: vrcore's, com.doktorplopz.vrcore.host.VrcoreActivity)
 #   ANDROID_SERIAL  the headset; needed when more than one is plugged in (see quest_device.sh)
 #   ADB           the adb to use (default: adb on the PATH)
 #   VR_DRY_RUN=1  print the adb commands instead of running them (no headset needed)
@@ -17,7 +17,7 @@ case "$1" in -h|--help) sed -n '2,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\
 APK=$1; PKG=$2; ZIP=${3:-}
 [ $# -ge 3 ] && shift 3 || shift $#
 [ $# -gt 0 ] || set -- vrcore:I
-ACT=${VR_ACTIVITY:-com.doktorplopz.letsgoaway.host.LetsGoAwayActivity}
+ACT=${VR_ACTIVITY:-com.doktorplopz.vrcore.host.VrcoreActivity}
 # a question to the headset: in a dry run the answer is no
 ask() { if [ -n "$VR_DRY_RUN" ]; then echo "+ adb $* (dry run: no)" >&2; return 1; fi; "$ADB" "$@" >/dev/null 2>&1; }
 quest_device

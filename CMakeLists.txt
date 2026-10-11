@@ -10,7 +10,7 @@
 # app is the APK's libmain.so (in place of the test scene's).
 #
 # Libraries come from VRCORE_EXTERN_DIR (default: the checkout's extern/, fetched and pinned
-# by scripts/setup.py --native-host): SDL3, volk, VMA, the Vulkan headers and, on Android, the
+# by tools/fetch_extern.py): SDL3, volk, VMA, the Vulkan headers and, on Android, the
 # OpenXR loader. The Mac sim runs on MoltenVK (Homebrew's molten-vk). Shaders are compiled by
 # glslc (Homebrew's shaderc on the Mac, the NDK's shader-tools for the APK).
 cmake_minimum_required(VERSION 3.20)
@@ -22,7 +22,7 @@ set(VRCORE_EXTERN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../extern" CACHE PATH "Pin
 
 # SDL3: shared on Android (SDL's activity loads libSDL3.so and libmain.so), static on desktop.
 if(NOT EXISTS ${VRCORE_EXTERN_DIR}/sdl3/CMakeLists.txt)
-    message(FATAL_ERROR "vrcore: no SDL3 at ${VRCORE_EXTERN_DIR}/sdl3 (run scripts/setup.py)")
+    message(FATAL_ERROR "vrcore: no SDL3 at ${VRCORE_EXTERN_DIR}/sdl3 (run tools/fetch_extern.py)")
 endif()
 if(ANDROID)
     set(SDL_SHARED ON CACHE BOOL "" FORCE)
@@ -40,7 +40,7 @@ add_subdirectory(${VRCORE_EXTERN_DIR}/sdl3 ${CMAKE_CURRENT_BINARY_DIR}/sdl3 ${_v
 
 foreach(_dir volk vma/include vulkan-headers/include cgltf imgui)
     if(NOT EXISTS ${VRCORE_EXTERN_DIR}/${_dir})
-        message(FATAL_ERROR "vrcore: no ${VRCORE_EXTERN_DIR}/${_dir} (run scripts/setup.py --native-host)")
+        message(FATAL_ERROR "vrcore: no ${VRCORE_EXTERN_DIR}/${_dir} (run tools/fetch_extern.py)")
     endif()
 endforeach()
 
@@ -49,7 +49,7 @@ endforeach()
 # and the arm64 .so, which build-android.sh copies into the APK's lib/arm64-v8a.
 set(VRCORE_PHONON_DIR ${VRCORE_EXTERN_DIR}/steam-audio/steamaudio)
 if(NOT EXISTS ${VRCORE_PHONON_DIR}/include/phonon.h)
-    message(FATAL_ERROR "vrcore: no Steam Audio at ${VRCORE_EXTERN_DIR}/steam-audio (run scripts/setup.py --native-host)")
+    message(FATAL_ERROR "vrcore: no Steam Audio at ${VRCORE_EXTERN_DIR}/steam-audio (run tools/fetch_extern.py)")
 endif()
 if(ANDROID)
     set(_vrcore_phonon_lib ${VRCORE_PHONON_DIR}/lib/android-armv8/libphonon.so)
@@ -59,7 +59,7 @@ else()
     message(FATAL_ERROR "vrcore: Steam Audio is wired for macOS and Android only so far")
 endif()
 if(NOT EXISTS ${_vrcore_phonon_lib})
-    message(FATAL_ERROR "vrcore: no ${_vrcore_phonon_lib} (run scripts/setup.py --native-host)")
+    message(FATAL_ERROR "vrcore: no ${_vrcore_phonon_lib} (run tools/fetch_extern.py)")
 endif()
 add_library(vrcore_phonon SHARED IMPORTED)
 set_target_properties(vrcore_phonon PROPERTIES IMPORTED_LOCATION ${_vrcore_phonon_lib})

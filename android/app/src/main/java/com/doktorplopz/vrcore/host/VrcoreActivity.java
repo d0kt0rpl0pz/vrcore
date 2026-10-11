@@ -1,4 +1,4 @@
-package com.doktorplopz.letsgoaway.host;
+package com.doktorplopz.vrcore.host;
 
 import java.util.ArrayList;
 
@@ -10,8 +10,8 @@ import android.util.Log;
 import org.libsdl.app.SDLActivity;
 
 /**
- * The app's activity. SDL loads libSDL3.so and libmain.so and runs SDL_main. Launch options come from
- * the intent extra "args", split at spaces outside quotes: am start ... --es args "--foveation 3 --fdm-view",
+ * The app's activity: vrcore's, the same in every game's APK (each APK names itself: android/app/build.gradle).
+ * SDL loads libSDL3.so and libmain.so and runs SDL_main. Launch options come from the intent extra "args", split at spaces outside quotes: am start ... --es args "--foveation 3 --fdm-view",
  * or with a value that has spaces, --es args "--script --args '--course 2'".
  *
  * BACK INTO VR (backToVr, called by the native side when the system file picker closes: vrcore's ui/pick.cpp).
@@ -21,7 +21,7 @@ import org.libsdl.app.SDLActivity;
  * after the result, while the panel is still closing, then every 1.5 s until the activity has the window focus,
  * 4 times at most.
  */
-public class LetsGoAwayActivity extends SDLActivity {
+public class VrcoreActivity extends SDLActivity {
     @Override
     protected String[] getArguments() {
         String args = getIntent() != null ? getIntent().getStringExtra("args") : null;
@@ -66,7 +66,7 @@ public class LetsGoAwayActivity extends SDLActivity {
                 Log.i("vrcore", "back to VR after the picker (attempt " + attempts + ")");
                 try {
                     Intent back = getPackageManager().getLaunchIntentForPackage(getPackageName());
-                    if (back == null) back = new Intent(LetsGoAwayActivity.this, LetsGoAwayActivity.class);
+                    if (back == null) back = new Intent(VrcoreActivity.this, VrcoreActivity.class);
                     back.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
                     startActivity(back);
                 } catch (Exception e) {

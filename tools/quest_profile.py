@@ -24,9 +24,9 @@ running (a game's VR build, VR_PKG, or any other).
 
   -h, --help                            this text
 
-  VR_PKG          the app's package (default com.doktorplopz.LetsGoAway; --restart starts it;
+  VR_PKG          the app's package (default the test scene, com.doktorplopz.vrcore.scene; --restart starts it;
                   live filters VrApi by its pid)
-  VR_ACTIVITY     its activity (default com.doktorplopz.letsgoaway.host.LetsGoAwayActivity)
+  VR_ACTIVITY     its activity (default com.doktorplopz.vrcore.host.VrcoreActivity)
   VR_PROFILE_DIR  where each run's raw output is kept (default ./profiles)
   ANDROID_SERIAL  the headset; needed when more than one is plugged in (adb reads it itself: no -s)
   ADB             the adb to use (default: adb on the PATH)
@@ -40,8 +40,8 @@ GPU time shading fragments.
 import os, re, subprocess, sys, threading, time, queue, datetime
 
 ADB = os.environ.get("ADB", "adb")
-PKG = os.environ.get("VR_PKG", "com.doktorplopz.LetsGoAway")
-ACT = os.environ.get("VR_ACTIVITY", "com.doktorplopz.letsgoaway.host.LetsGoAwayActivity")
+PKG = os.environ.get("VR_PKG", "com.doktorplopz.vrcore.scene")
+ACT = os.environ.get("VR_ACTIVITY", "com.doktorplopz.vrcore.host.VrcoreActivity")
 DRY = bool(os.environ.get("VR_DRY_RUN"))
 OUT = os.path.abspath(os.environ.get("VR_PROFILE_DIR", "profiles"))
 # the recommended eye buffer (scale 1.0) per headset, for overdraw = fragments / eye pixels

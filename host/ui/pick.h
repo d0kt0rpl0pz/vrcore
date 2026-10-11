@@ -7,7 +7,7 @@
  * their MIME type, and a .7z has none it knows). Its callback runs on Android's UI thread; the picks are handed to
  * the main thread (take). Each is a URI (content://... on Android) that SDL_IOFromFile opens while the grant
  * lasts (the activity's lifetime). BACK INTO VR: when the picker closes, the activity's backToVr brings the app
- * to the front again (LetsGoAwayActivity.java), or the Quest leaves the player in its own UI.
+ * to the front again (VrcoreActivity.java), or the Quest leaves the player in its own UI.
  */
 #pragma once
 

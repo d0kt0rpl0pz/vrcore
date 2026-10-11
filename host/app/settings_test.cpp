@@ -62,7 +62,7 @@ bool bits_equal(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 void reopen(const std::string &file)
 {
     set_path(file.c_str());
-    open("doktorplopz", "LetsGoAway");
+    open("vrcore", "settings-test");      // set_path gives the file: no folder is made
 }
 
 void fresh(const std::string &file)

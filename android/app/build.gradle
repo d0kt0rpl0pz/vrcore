@@ -11,20 +11,28 @@ def frontDir = project.findProperty('vrcoreFront')
 def jniLibsDir = project.findProperty('vrcoreJniLibs')
 // A folder of extra assets built beside the APK (Steam Audio's own THIRDPARTY.md, copied from extern/).
 def assetsDir = project.findProperty('vrcoreAssets')
+// The APK's identity, the game's: its application id (the app's data folder on the headset; the same id and key
+// update an install in place), its name in the Library, its version. None given: the test scene's.
+def appId = project.findProperty('vrcoreAppId') ?: 'com.doktorplopz.vrcore.scene'
+def appName = project.findProperty('vrcoreAppName') ?: 'vrcore scene'
+def appVersionName = project.findProperty('vrcoreVersionName') ?: '0.2'
+def appVersionCode = (project.findProperty('vrcoreVersionCode') ?: '1') as int
 
 android {
-    // The Java package for the activity (lower case, as Java packages are); the application id is below.
-    namespace = 'com.doktorplopz.letsgoaway.host'
+    // The Java package of vrcore's activity (VrcoreActivity), the same in every game's APK; the application id is
+    // the game's (vrcoreAppId).
+    namespace = 'com.doktorplopz.vrcore.host'
     compileSdk 35
     ndkVersion = '27.3.13750724'   // NDK r27d
     ndkPath project.findProperty('vrcoreNdk')
 
     defaultConfig {
-        applicationId 'com.doktorplopz.LetsGoAway'
+        applicationId appId
         minSdk 32
         targetSdk 35
-        versionCode 1
-        versionName '0.5-m5'
+        versionCode appVersionCode
+        versionName appVersionName
+        resValue 'string', 'app_name', appName
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_PLATFORM=android-32', '-DANDROID_STL=c++_static',

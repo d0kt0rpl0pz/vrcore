@@ -29,7 +29,8 @@ host/          the host: app (loop, plugin, pacing, settings, layers), xr, gpu, 
 shaders/       the host's GLSL (compiled to SPIR-V by glslc at build time)
 android/       the Gradle project for the APK (SDL's activity, the file picker)
 assets/        the hand wheel's model and the licences packed into the APK
-tools/         vr_plugin_test.c (headless plugin test), quest_install.sh / quest_bench.sh / quest_profile.py
+tools/         fetch_extern.py (the pinned libraries), vr_plugin_test.c (headless plugin test),
+               quest_install.sh / quest_bench.sh / quest_profile.py
 ```
 
 **`abi/vrcore.h`** is the contract between a game's plugin and the host. The game runs on its own thread, paced to
@@ -49,13 +50,22 @@ camera for comfort and so you don't throw up).
 
 ## Using it
 
-A game uses it in two places:
+A game uses it in three places:
+
+- **The libraries:** `tools/fetch_extern.py` fetches the pinned third-party sources (`THIRD_PARTY.md`) into
+  `extern/` (default `../../extern` from here, CMake's `VRCORE_EXTERN_DIR`; `--extern DIR` elsewhere).
+  `--desktop` fetches SDL 3 and Dear ImGui only. A game's setup calls it and keeps no copy of these pins.
 
 - **The plugin:** the game's CMake compiles `native/*.c` into its plugin and includes `abi/`, finding vrcore through
   `VRCORE_DIR`.
 - **The front:** a folder whose `CMakeLists.txt` calls `vrcore_add_app()`, passed to this project as
   `-DVRCORE_FRONT_DIR=<folder>`. On the Mac it builds the sim; for the APK it is `libmain.so`. The head of
   `CMakeLists.txt` has the commands.
+- **The APK's identity** is the game's, passed to Gradle: `-PvrcoreAppId=<application id>`
+  `-PvrcoreAppName=<name in the Library>` `-PvrcoreVersionName=<version>` (and `-PvrcoreVersionCode`), beside
+  `-PvrcoreFront`. Without them the APK is the test scene (`com.doktorplopz.vrcore.scene`). The activity is
+  vrcore's, `com.doktorplopz.vrcore.host.VrcoreActivity`, in every game's APK. The front names its own settings
+  folder (`settings::open(org, app)`).
 
 A change to `abi/vrcore.h` must be made in `host/app/plugin.h` and `tools/vr_plugin_test.c` at the same time,
 and every game has to be rebuilt afterwards. `VR_ABI_VERSION` is bumped only when an existing call or float offset
