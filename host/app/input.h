@@ -1,0 +1,104 @@
+/*
+ * input.h -- what the player holds, once a display frame (the Input System's XR / Gamepad / Keyboard layouts).
+ *
+ * THE SNAPSHOT. The host fills one Input before each update (the front's thread, where update runs): the two
+ * Touch controllers (OpenXR actions, xr/xr_actions.cpp; none in the sim), the head, the pads (SDL gamepads, both
+ * hosts) and the keyboard (SDL's key state, both hosts). Levels and poses only, read once a frame; the edges a
+ * front needs it keeps itself (as the C# does), except the keyboard's and the mouse's button, which the host keeps
+ * (pressed this frame).
+ * Unfocused (Horizon's menu up) every hand reads inactive and zero.
+ *
+ * THE OUTPUTS. haptic / stop_haptics drive the Touch controllers (xrApplyHapticFeedback), pad_rumble a pad's
+ * motors (SDL_RumbleGamepad). Called from update.
+ *
+ * Poses are in the host's LOCAL space (the room, as the eye poses in gpu::Eye): metres, y up, -z forward.
+ */
+#pragma once
+
+#include <cstdint>
+
+#include "../gpu/vmath.h"
+
+namespace vrcore {
+
+struct Pose {
+    float pos[3] = {0, 0, 0};
+    Quat rot;
+};
+
+// One Touch controller (or whatever the runtime's interaction profile gives for that hand).
+struct Hand {
+    bool active = false;            // the actions are bound and the session focused
+    bool tracked = false;           // `grip`'s position and orientation are valid this frame
+    Pose grip;                      // the grip pose, at the display time
+    float trigger = 0;              // 0..1
+    float squeeze = 0;              // 0..1
+    bool squeezed = false;          // the grip "pressed": on at 0.5 of squeeze, off under 0.375 (the Input System's)
+    float stick[2] = {0, 0};        // thumbstick x right, y up, -1..1
+    bool stick_click = false;
+    bool primary = false;           // A (right) / X (left)
+    bool secondary = false;         // B (right) / Y (left)
+    bool menu = false;              // the left controller's menu button (the right one's is the runtime's)
+};
+
+// One gamepad, SDL's names (the Xbox layout: south A, east B, west X, north Y).
+struct Pad {
+    uint32_t id = 0;                // SDL_JoystickID: the same pad keeps it until removed
+    float left[2] = {0, 0};         // sticks: x right, y UP (SDL's y down, turned), -1..1
+    float right[2] = {0, 0};
+    float left_trigger = 0, right_trigger = 0;      // 0..1
+    bool south = false, east = false, west = false, north = false;
+    bool back = false, start = false, guide = false;
+    bool left_shoulder = false, right_shoulder = false;
+    bool left_stick = false, right_stick = false;   // the sticks' clicks
+    bool up = false, down = false, left_dpad = false, right_dpad = false;
+};
+
+// The mouse (the sim's window; all zero on the headset).
+struct Mouse {
+    bool present = false;           // a window with a pointer
+    bool inside = false;            // the pointer is over the window
+    float x = 0, y = 0;             // window pixels (the swapchain's), from the top left
+    float nx = 0, ny = 0;           // 0..1 over the window, from the top left
+    bool left = false;              // the left button held
+    bool left_pressed = false;      // it went down since the last snapshot
+    int eye = -1;                   // the eye whose picture is under the pointer (0 left, 1 right); -1 none
+    float eye_u = 0, eye_v = 0;     // the point in that eye's picture, 0..1 from its top left
+};
+
+struct Input {
+    static constexpr int kMaxPads = 8;
+    static constexpr int kKeys = 512;               // SDL_SCANCODE_COUNT
+
+    enum { kLeft = 0, kRight = 1 };
+    Hand hands[2];
+    bool head_tracked = false;
+    Pose head;                                      // between the eyes, at the display time
+    Pad pads[kMaxPads];
+    int pad_count = 0;                              // in the order added
+    bool keys[kKeys] = {};                          // held, by SDL_Scancode
+    bool pressed[kKeys] = {};                       // went down since the last snapshot
+    bool shift = false, alt = false, ctrl = false;  // either side
+    Mouse mouse;
+    float dt = 0;                                   // seconds since the last snapshot (0 on the first)
+
+    const Pad *pad(uint32_t id) const               // null: not there (removed)
+    {
+        for (int i = 0; i < pad_count; ++i)
+            if (pads[i].id == id) return &pads[i];
+        return nullptr;
+    }
+};
+
+// This frame's snapshot (valid in update; zero before the first).
+const Input &input();
+
+// A Touch controller's vibration: `amplitude` 0..1 for `seconds` (a new one replaces the last). No-op in the sim.
+void haptic(int hand, float amplitude, float seconds);
+// Both hands' vibration stopped now.
+void stop_haptics();
+// A pad's motors, 0..1 each, until changed (the host renews them so a stopped app leaves nothing running).
+// An id no longer there is ignored.
+void pad_rumble(uint32_t id, float low, float high);
+
+}

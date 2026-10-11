@@ -1,0 +1,140 @@
+/*
+ * xr_host.h -- the OpenXR host's state, shared by xr.cpp (instance, session, the frame loop),
+ * xr_swapchain.cpp (the eye swapchain and its density maps, the eye target on it) and xr_meta.cpp (refresh rate,
+ * foveation, sharpening, performance levels, the thread hint). Android only. Host-internal.
+ */
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include "../gpu/vk.h"
+
+#include <jni.h>
+#include <time.h>
+#include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
+
+#include "../app/app.h"
+#include "../gpu/device.h"
+#include "../gpu/eye_target.h"
+#include "../gpu/render_host.h"
+
+// Logs the failing call and returns `ret` from the enclosing function.
+#define VRCORE_XR(call, ret)                                                              \
+    do {                                                                                  \
+        XrResult xr_ = (call);                                                            \
+        if (XR_FAILED(xr_)) {                                                             \
+            ::vrcore::log("openxr: %s failed: %d (%s:%d)", #call, (int)xr_, __FILE__, __LINE__); \
+            return ret;                                                                   \
+        }                                                                                 \
+    } while (0)
+
+namespace vrcore::xr {
+
+struct Actions;                         // xr_actions.cpp
+
+// The optional extensions, one flag each (the required ones fail instance creation).
+struct Extensions {
+    bool refresh_rate = false;          // XR_FB_display_refresh_rate
+    bool foveation = false;             // XR_FB_foveation + _configuration + _vulkan + XR_FB_swapchain_update_state
+    bool perf_settings = false;         // XR_EXT_performance_settings
+    bool thread_settings = false;       // XR_KHR_android_thread_settings
+    bool convert_timespec = false;      // XR_KHR_convert_timespec_time (the display time on CLOCK_MONOTONIC)
+    bool touch_plus = false;            // XR_META_touch_controller_plus (the Quest 3's controllers' profile)
+    bool frame_controller = false;      // XR_VALVE_frame_controller_interaction
+    bool layer_settings = false;        // XR_FB_composition_layer_settings (sharpening)
+};
+
+struct Host {
+    const AppInfo *info = nullptr;
+    Options *opt = nullptr;             // the launch's, then the graphics in force (request_graphics changes them)
+
+    jobject activity = nullptr;         // a global reference, for the loader and the instance
+
+    XrInstance instance = XR_NULL_HANDLE;
+    XrSystemId system = XR_NULL_SYSTEM_ID;
+    XrSession session = XR_NULL_HANDLE;
+    XrSpace local = XR_NULL_HANDLE;
+    XrSessionState state = XR_SESSION_STATE_UNKNOWN;
+    bool running = false;
+    bool quit = false;
+    Extensions ext;
+    XrViewConfigurationView config_views[2] = {{XR_TYPE_VIEW_CONFIGURATION_VIEW}, {XR_TYPE_VIEW_CONFIGURATION_VIEW}};
+
+    // extension entry points
+    PFN_xrGetVulkanGraphicsRequirements2KHR get_vulkan_requirements = nullptr;
+    PFN_xrCreateVulkanInstanceKHR create_vulkan_instance = nullptr;
+    PFN_xrGetVulkanGraphicsDevice2KHR get_vulkan_device = nullptr;
+    PFN_xrCreateVulkanDeviceKHR create_vulkan_device = nullptr;
+    PFN_xrEnumerateDisplayRefreshRatesFB enumerate_refresh_rates = nullptr;
+    PFN_xrGetDisplayRefreshRateFB get_refresh_rate = nullptr;
+    PFN_xrRequestDisplayRefreshRateFB request_refresh_rate = nullptr;
+    PFN_xrCreateFoveationProfileFB create_foveation_profile = nullptr;
+    PFN_xrDestroyFoveationProfileFB destroy_foveation_profile = nullptr;
+    PFN_xrUpdateSwapchainFB update_swapchain = nullptr;
+    PFN_xrPerfSettingsSetPerformanceLevelEXT set_performance_level = nullptr;
+    PFN_xrSetAndroidApplicationThreadKHR set_thread = nullptr;
+    PFN_xrConvertTimeToTimespecTimeKHR time_to_timespec = nullptr;
+
+    // the eye swapchain: one, two layers
+    XrSwapchain swapchain = XR_NULL_HANDLE;
+    uint32_t width = 0, height = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    bool swapchain_fdm = false;         // made with the density-map flag
+    std::vector<XrSwapchainImageVulkanKHR> images;
+    std::vector<XrSwapchainImageFoveationVulkanFB> fdm_images;
+
+    gpu::Device dev;
+    gpu::EyeTarget target;
+    gpu::RendererImpl r;
+    bool front_up = false;
+
+    Actions *actions = nullptr;         // the controllers (xr_actions.cpp)
+
+    uint32_t recentres = 0;             // LOCAL space change events (the headset's recentre)
+    float refresh_hz = 0;               // in force (0: unknown)
+    int foveation = -1;                 // in force (-1: none)
+    float eye_pending = 0;              // an eye resolution asked for, made at eye_at (steady seconds); 0: none
+    double eye_at = 0;
+};
+
+// An entry point by name; null when the runtime has none.
+template <typename T>
+inline void load(XrInstance instance, const char *name, T &fn)
+{
+    if (XR_FAILED(xrGetInstanceProcAddr(instance, name, reinterpret_cast<PFN_xrVoidFunction *>(&fn)))) fn = nullptr;
+}
+
+// xr_swapchain.cpp
+bool swapchain_create(Host &h);
+void swapchain_destroy(Host &h);
+bool eye_target_make(Host &h);              // the eye target (4x MSAA) on the swapchain's images
+// A new eye resolution (opt's) while the session runs: the GPU idled, the swapchain made again (foveation set on the
+// new one), the eye target made again on it. False (logged): the loop cannot go on.
+bool eye_remake(Host &h);
+
+// xr_layers.cpp (app/layers.h's quad layers)
+void layers_bind(Host &h);                  // the session the layers are made in
+void layers_release(Host &h);               // after the frame's submit: the images drawn this frame
+// those up, in the order made: the underlays (under the projection layer) and the rest (over it)
+void layers_compose(Host &h, std::vector<XrCompositionLayerQuad> &under, std::vector<XrCompositionLayerQuad> &over);
+
+// xr_actions.cpp (app/input.h's hands and head)
+bool actions_create(Host &h);               // after the instance: the action set, the profiles' bindings
+bool actions_attach(Host &h);               // after the session: attached, the grip and head spaces
+void actions_sync(Host &h, XrTime t);       // each frame after xrWaitFrame (unfocused: the hands zero)
+void actions_profile_changed(Host &h);      // XrEventDataInteractionProfileChanged: logged
+void actions_destroy(Host &h);
+
+// xr_meta.cpp
+void meta_load(Host &h);                // the extension entry points
+void meta_session_start(Host &h);       // refresh rate, performance levels, thread hint
+std::vector<float> meta_rates(Host &h); // the runtime's refresh rates as listed (a session made; empty: none)
+void refresh_set(Host &h);              // opt->hz: the listed rate nearest it (a tie the lower)
+bool foveation_set(Host &h, int level); // 0-3: Off, Low, Medium, High; dynamic off
+// The projection layer's settings for opt->sharpen (chained on it each frame); null for Off or no extension.
+const void *sharpen_settings(Host &h);
+void meta_event(Host &h, const XrEventDataBuffer &e);
+
+}

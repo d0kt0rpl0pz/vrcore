@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Passed by vrmodel/build-android.sh apk (see there for the defaults).
+def sdlDir = file(project.findProperty('vrcoreSdl') ?: "$rootDir/../../../extern/sdl3")
+def externDir = file(project.findProperty('vrcoreExtern') ?: "$rootDir/../../../extern")
+// A game's front (CMakeLists.txt calling vrcore_add_app: the APK's libmain.so; none: the test scene) and a
+// folder of prebuilt libraries to package beside it (<dir>/arm64-v8a/*.so: the game's plugin).
+def frontDir = project.findProperty('vrcoreFront')
+def jniLibsDir = project.findProperty('vrcoreJniLibs')
+// A folder of extra assets built beside the APK (Steam Audio's own THIRDPARTY.md, copied from extern/).
+def assetsDir = project.findProperty('vrcoreAssets')
+
+android {
+    // The Java package for the activity (lower case, as Java packages are); the application id is below.
+    namespace = 'com.doktorplopz.letsgoaway.host'
+    compileSdk 35
+    ndkVersion = '27.3.13750724'   // NDK r27d
+    ndkPath project.findProperty('vrcoreNdk')
+
+    defaultConfig {
+        applicationId 'com.doktorplopz.LetsGoAway'
+        minSdk 32
+        targetSdk 35
+        versionCode 1
+        versionName '0.5-m5'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_PLATFORM=android-32', '-DANDROID_STL=c++_static',
+                          "-DVRCORE_EXTERN_DIR=${externDir}", "-DVRCORE_FRONT_DIR=${frontDir ?: ''}"
+                abiFilters 'arm64-v8a'
+            }
+        }
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file('../../CMakeLists.txt')
+        }
+    }
+
+    sourceSets {
+        main {
+            // SDL's Java side (SDLActivity and friends) is compiled from the pinned checkout.
+            java.srcDirs += "$sdlDir/android-project/app/src/main/java"
+            if (jniLibsDir) jniLibs.srcDirs += file(jniLibsDir)
+            // vrcore's own assets (the hand wheel's model)
+            assets.srcDirs += '../../assets'
+            if (assetsDir) assets.srcDirs += file(assetsDir)
+        }
+    }
+
+    packaging {
+        // libphonon.so is in jniLibs and is also the imported library of the CMake build
+        jniLibs {
+            pickFirsts += '**/libphonon.so'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    lint {
+        abortOnError = false
+    }
+}

@@ -1,0 +1,11 @@
+.DS_Store
+build/
+*.zip
+*.7z
+devnotes/
+
+# Gradle and Android state (the Gradle template in android/)
+android/.gradle/
+android/local.properties
+android/.idea/
+android/app/.cxx/
