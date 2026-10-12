@@ -9,3 +9,6 @@ android/.gradle/
 android/local.properties
 android/.idea/
 android/app/.cxx/
+
+# Python bytecode from tools/
+__pycache__/
