@@ -14,3 +14,12 @@ allprojects {
         google()
     }
 }
+
+// A game's own folder for the build's output (vrcoreBuildDir: <dir>/vrcore and <dir>/app, the native build in
+// <dir>/cxx), so two games built from one vrcore checkout keep theirs apart. None given: android/ and android/app/.
+def outDir = findProperty('vrcoreBuildDir')
+if (outDir) {
+    allprojects {
+        layout.buildDirectory = file("$outDir/${project.name}")
+    }
+}

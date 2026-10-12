@@ -48,6 +48,9 @@ android {
     externalNativeBuild {
         cmake {
             path = file('../../CMakeLists.txt')
+            // beside the rest of the game's output (vrcoreBuildDir, the root build.gradle)
+            def outDir = project.findProperty('vrcoreBuildDir')
+            if (outDir) buildStagingDirectory = file("$outDir/cxx")
         }
     }
 
