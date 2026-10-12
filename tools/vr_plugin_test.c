@@ -35,10 +35,12 @@
  * frames (vr_frame). Like a host it loads a fresh COPY of the
  * plugin's binary (twice, one after the other, to prove a second Play in the same
  * process starts clean), then: start, a coin at 2 s, gas held from 4 s (it starts the
- * game), audio pulled on a thread the way OnAudioFilterRead does at 48 kHz, the frame
- * copied out 60 times a second, a PPM every 5 s, stop. Prints the game's frame and its
- * three health counters (vr_stats; Rave Racer's traps, unmapped, ROM writes), audio
- * underruns and the picture's content, and exits 0 only if the run was clean.
+ * game), audio pulled on a thread at 48 kHz the way the host's audio thread does
+ * (host/audio/audio.cpp: frames a pull did not write are silence), the frame copied out
+ * 60 times a second, a PPM every 5 s, stop. Prints the game's frame and its three health
+ * counters (vr_stats; Rave Racer's traps, unmapped, ROM writes), the audio's RMS, short
+ * pulls and bad samples (not finite, or past full scale: these fail the run) and the
+ * picture's content, and exits 0 only if the run was clean.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +75,7 @@ static struct { fn_version version; fn_start start; fn_state state; fn_stop stop
                 fn_frame frame; fn_audio audio; fn_stats stats; fn_vrframe vrframe; fn_int renderer; fn_world world; fn_istats istats;
                 fn_int vfloats; fn_name game; fn_int ntables; fn_size table_size; } api;
 static atomic_int audio_run;
-static double audio_rms_sum; static long audio_n, audio_nonzero;
+static double audio_rms_sum; static long audio_n, audio_nonzero, audio_short, audio_bad;
 
 /* VR_TEST_<name> */
 static const char *env(const char *name)
@@ -108,8 +110,16 @@ static void *audio_thread(void *arg)
     float buf[1024 * 2];
     double t0 = now_s(); long pulled = 0;
     while (atomic_load(&audio_run)) {           /* 1024 frames at 48 kHz, on the audio clock */
-        api.audio(buf, 1024, 2);
-        for (int i = 0; i < 2048; i++) { audio_rms_sum += (double)buf[i] * buf[i]; if (buf[i] != 0) audio_nonzero++; }
+        /* the host's rule (host/audio/audio.cpp next_block): the frames a pull did not write are silence; a
+         * sample that is not finite or is past full scale is the plugin's fault and fails the run */
+        int got = api.audio(buf, 1024, 2);
+        if (got < 0) got = 0;
+        if (got > 1024) got = 1024;
+        if (got < 1024) { memset(buf + got * 2, 0, (size_t)(1024 - got) * 2 * sizeof *buf); audio_short++; }
+        for (int i = 0; i < 2048; i++) {
+            if (!isfinite(buf[i]) || fabsf(buf[i]) > 1.0f) { audio_bad++; continue; }
+            audio_rms_sum += (double)buf[i] * buf[i]; if (buf[i] != 0) audio_nonzero++;
+        }
         audio_n += 2048; pulled += 1024;
         const double due = t0 + pulled / 48000.0 - now_s();
         if (due > 0) usleep((useconds_t)(due * 1e6));
@@ -544,7 +554,7 @@ static int run_once(const char *bundle, const char *roms, double secs, const cha
     snprintf(args, sizeof args, "%s %s", sw ? "--sw" : "", extra ? extra : "");
     if (api.start(roms, 48000, args) != 0) { fprintf(stderr, "start failed\n"); return 1; }
     if (api.start(roms, 48000, NULL) != -1) { fprintf(stderr, "a second start in one copy was not refused\n"); return 1; }
-    audio_rms_sum = 0; audio_n = audio_nonzero = 0;
+    audio_rms_sum = 0; audio_n = audio_nonzero = audio_short = audio_bad = 0;
     atomic_store(&audio_run, 1);
     pthread_t at; pthread_create(&at, NULL, audio_thread, NULL);
 
@@ -675,12 +685,12 @@ static int run_once(const char *bundle, const char *roms, double secs, const cha
         rp_bad = rp_step < 4 || rp_f1 - rp_f0 != 24 || rp_f2 != rp_f1 || rp_q1 <= rp_q0 || !rp_q2 || rp_q1 < rp_q2 * 9 / 10;
     }
     printf("pass %d: %.1f s, game frame %u (%.2f fps), %u pictures taken, picture %dx%d %.1f%% lit, "
-           "worst copy %.2f ms, traps %u unmapped %u romwrites %u, audio RMS %.4f (%.1f%% nonzero), stopped %d\n",
+           "worst copy %.2f ms, traps %u unmapped %u romwrites %u, audio RMS %.4f (%.1f%% nonzero, %ld short pulls, %ld bad samples), stopped %d\n",
            pass, el, fr, fr / el, got, w, hh, w * hh ? 100.0 * lit / (w * hh) : 0, worst_copy * 1e3, traps, unm, rw,
-           audio_n ? sqrt(audio_rms_sum / audio_n) : 0, audio_n ? 100.0 * audio_nonzero / audio_n : 0, stopped);
+           audio_n ? sqrt(audio_rms_sum / audio_n) : 0, audio_n ? 100.0 * audio_nonzero / audio_n : 0, audio_short, audio_bad, stopped);
     unlink(dst);                                /* mapped stays mapped; the old copy is never unloaded */
     const double frozen_s = (ex_at >= 0 && !sw ? 4 : 0) + (rp_at >= 0 && !sw ? 1.5 : 0);   /* explore / the pause held the game still */
-    return ex_bad || rp_bad || !(stopped && traps == 0 && unm == 0 && fr > 50 * (el - frozen_s) && lit > 0 && audio_nonzero > 0 && (sw || max_ni > 300));
+    return ex_bad || rp_bad || !(stopped && traps == 0 && unm == 0 && fr > 50 * (el - frozen_s) && lit > 0 && audio_nonzero > 0 && audio_bad == 0 && (sw || max_ni > 300));
 }
 
 int main(int argc, char **argv)
