@@ -53,6 +53,9 @@ rumble), `ui/menu.h` (menus, the file picker), `ui/graphics.h` (the headset's Gr
 
 ## Using it
 
+`docs/porting.md` walks through bringing a game to vrcore: the plugin contract, the front's hooks, smooth
+motion between game frames, building, and a step-by-step order for a new port.
+
 A game uses it in three places:
 
 - **The libraries:** `tools/fetch_extern.py` fetches the pinned third-party sources (`THIRD_PARTY.md`) into
