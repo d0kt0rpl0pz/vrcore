@@ -682,22 +682,50 @@ void Menu::prepare(gpu::Frame &f)
     float panel_w = panel_.w / kPxPerM;
     if (paint(panel_)) layer_place(panel_.layer, pos_, rot, panel_w, panel_.h / kPxPerM, true);
     else hide(panel_);
-    float edge[2] = {panel_w / 2 + kHinge, panel_w / 2 + kHinge};     // the next box's hinge, left and right
+    // Each side's row starts kHinge off the panel's edge and curves round you: every stretch along it (a box, or a
+    // box's gap) turns kTurn more than the last, the far edge coming towards you, so the first box stands at kTurn
+    // and the row keeps its distance (Box). Per side: the row's end in the panel's frame (out from the edge, towards
+    // you) and its turn so far.
+    struct Row {
+        float out, in, turn;
+    } row[2] = {{panel_w / 2 + kHinge, 0, 0}, {panel_w / 2 + kHinge, 0, 0}};
+    // the next stretch, `len` metres: its middle in the room, its yaw; the row's end moves past it
+    auto stretch = [&](bool left, float len, float mid[3], float &yaw) {
+        Row &r = row[left ? 0 : 1];
+        r.turn += kTurn;
+        float c = std::cos(r.turn), s = std::sin(r.turn), side = left ? -1.f : 1.f;
+        panel_point(pos_, yaw_, side * (r.out + c * len / 2), 0, r.in + s * len / 2, mid);
+        yaw = yaw_ + (left ? r.turn : -r.turn);
+        r.out += c * len;
+        r.in += s * len;
+    };
     auto hinge = [&](Drawn &d) {
         if (!paint(d)) {
             hide(d);
             return;
         }
-        float bw = d.w / kPxPerM, side = d.left ? -1.f : 1.f;
-        float a = d.left ? kTurn : -kTurn;  // the far edge comes towards you
-        float &e = edge[d.left ? 0 : 1];
-        float c[3];
-        panel_point(pos_, yaw_, side * (e + std::cos(kTurn) * bw / 2), 0, std::sin(kTurn) * bw / 2, c);
-        layer_place(d.layer, c, yaw_quat(yaw_ + a), bw, d.h / kPxPerM, true);
+        float bw = d.w / kPxPerM, c[3], yaw;
+        stretch(d.left, bw, c, yaw);
+        layer_place(d.layer, c, yaw_quat(yaw), bw, d.h / kPxPerM, true);
+        Row &r = row[d.left ? 0 : 1];
+        r.out += std::cos(r.turn) * kHinge;     // the next one kHinge on
+        r.in += std::sin(r.turn) * kHinge;
     };
     if (legend_.w) hinge(legend_);
     else hide(legend_);
-    for (Drawn &d : box_layers_) {
+    for (size_t i = 0; i < box_layers_.size(); ++i) {
+        Drawn &d = box_layers_[i];
+        const Box &b = boxes_[i];
+        if (b.gap > 0) {
+            float mid[3], yaw;
+            stretch(b.left, b.gap, mid, yaw);
+            if (b.placed) b.placed(mid, yaw, pos_, yaw_);
+        } else if (b.placed) {
+            float mid[3];
+            const Row &r = row[b.left ? 0 : 1];
+            panel_point(pos_, yaw_, (b.left ? -1.f : 1.f) * r.out, 0, r.in, mid);
+            b.placed(mid, yaw_ + (b.left ? r.turn : -r.turn), pos_, yaw_);
+        }
         if (d.w) hinge(d);
         else hide(d);
     }

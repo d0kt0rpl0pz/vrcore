@@ -75,14 +75,22 @@ struct Item {
 };
 
 // A front's box beside the panel (Daytona's records), drawn on the menu's
-// background with the menu's margin round it.
+// background with the menu's margin round it. The boxes of a side run outwards in the order given, each kHinge
+// (3 cm) past the last, the row curving round you: the first turned 30 degrees in (PLACEMENT), each further stretch
+// (a box, or a box's gap) 30 more. The right side's start after CONTROLS.
 struct Box {
     bool left = true;                       // hinged on the panel's left edge (else its right, after CONTROLS)
     uint32_t max_width = 1024, max_height = 1024;   // its layer's pixels: the largest it can be, margins included
+    // Metres left empty before it in its row, a stretch of its own (turned as a box would be), kept also while it
+    // is not shown: room for something of the front's own (Rave Racer's Reiko stands there).
+    float gap = 0;
     // Its contents' size in metres this frame; false: not shown (nothing to show yet).
     std::function<bool(float &width_m, float &height_m)> measure;
     // Its contents into `dl`, their top left at ImGui's pixel (x, y), `px_per_m` pixels a metre.
     std::function<void(ImDrawList *dl, float x, float y, float px_per_m)> draw;
+    // Every prepare while the menu is up, shown or not: the middle of its gap (at the panel's middle height; no gap:
+    // where the box starts), that stretch's yaw, and the panel's middle and yaw. Empty: not told.
+    std::function<void(const float gap_mid[3], float line_yaw, const float panel_pos[3], float panel_yaw)> placed;
 };
 
 using Legend = std::vector<std::pair<std::string, std::string>>;    // { button, what it does }
