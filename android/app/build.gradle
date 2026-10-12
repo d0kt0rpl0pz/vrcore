@@ -22,14 +22,14 @@ android {
     // The Java package of vrcore's activity (VrcoreActivity), the same in every game's APK; the application id is
     // the game's (vrcoreAppId).
     namespace = 'com.doktorplopz.vrcore.host'
-    compileSdk 35
+    compileSdk = 35
     ndkVersion = '27.3.13750724'   // NDK r27d
-    ndkPath project.findProperty('vrcoreNdk')
+    ndkPath = project.findProperty('vrcoreNdk')
 
     defaultConfig {
         applicationId appId
-        minSdk 32
-        targetSdk 35
+        minSdk = 32
+        targetSdk = 35
         versionCode appVersionCode
         versionName appVersionName
         resValue 'string', 'app_name', appName
