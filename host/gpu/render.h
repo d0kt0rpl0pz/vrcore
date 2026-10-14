@@ -47,7 +47,7 @@ enum class Cull { None, Back, Front };
 // Opaque: off. Alpha: SrcAlpha, OneMinusSrcAlpha. Premultiplied: One, OneMinusSrcAlpha. Additive: One, One.
 enum class Blend { Opaque, Alpha, Premultiplied, Additive };
 enum class Compare { Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always };
-enum class StencilOp { Keep, Zero, Replace };
+enum class StencilOp { Keep, Zero, Replace, IncrementWrap, DecrementWrap };
 enum class TextureFormat { R8, RGBA8, RGBA8_sRGB };
 enum class Filter { Nearest, Linear };
 enum class Address { Clamp, Repeat, RepeatU };   // RepeatU: across repeated, down clamped (a panorama)
@@ -72,8 +72,9 @@ struct SpecConstant {
 struct StencilDesc {
     bool enable = false;
     Compare compare = Compare::Always;
-    StencilOp pass = StencilOp::Keep;       // on depth and stencil passing; failing keeps
+    StencilOp pass = StencilOp::Keep;       // on depth and stencil passing; the stencil failing keeps
     uint8_t ref = 0;
+    StencilOp depth_fail = StencilOp::Keep; // on the stencil passing and depth failing (z-fail shadow volumes)
 };
 
 struct PipelineDesc {
@@ -84,6 +85,7 @@ struct PipelineDesc {
     Topology topology = Topology::Triangles;
     Cull cull = Cull::Back;                 // counter-clockwise is front
     Blend blend = Blend::Opaque;
+    bool color_write = true;                // false: depth and stencil only
     bool depth_test = true;                 // eye pass only
     bool depth_write = true;
     Compare depth_compare = Compare::GreaterOrEqual;

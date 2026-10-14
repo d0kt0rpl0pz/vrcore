@@ -62,6 +62,8 @@ VkStencilOp vk_stencil_op(StencilOp o)
     case StencilOp::Keep: return VK_STENCIL_OP_KEEP;
     case StencilOp::Zero: return VK_STENCIL_OP_ZERO;
     case StencilOp::Replace: return VK_STENCIL_OP_REPLACE;
+    case StencilOp::IncrementWrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+    case StencilOp::DecrementWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
     }
     return VK_STENCIL_OP_KEEP;
 }
@@ -897,7 +899,7 @@ Pipeline *Renderer::create_pipeline(const PipelineDesc &d)
             VkStencilOpState so = {};
             so.failOp = VK_STENCIL_OP_KEEP;
             so.passOp = vk_stencil_op(d.stencil.pass);
-            so.depthFailOp = VK_STENCIL_OP_KEEP;
+            so.depthFailOp = vk_stencil_op(d.stencil.depth_fail);
             so.compareOp = vk_compare(d.stencil.compare);
             so.compareMask = 0xff;
             so.writeMask = 0xff;
@@ -906,8 +908,9 @@ Pipeline *Renderer::create_pipeline(const PipelineDesc &d)
         }
 
         VkPipelineColorBlendAttachmentState ba = {};
-        ba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                            VK_COLOR_COMPONENT_A_BIT;
+        ba.colorWriteMask = d.color_write ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+                                          : 0;
         if (d.blend != Blend::Opaque) {
             VkBlendFactor src = d.blend == Blend::Alpha ? VK_BLEND_FACTOR_SRC_ALPHA : VK_BLEND_FACTOR_ONE;
             VkBlendFactor dst = d.blend == Blend::Additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
