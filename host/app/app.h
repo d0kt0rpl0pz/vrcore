@@ -41,6 +41,8 @@ struct Options {
     bool spatial = true;        // --spatial 0|1: the cabinet speakers through Steam Audio, or the plain stereo
     bool head_lock = false;     // --head-lock: the eyes held where the first frame found them, level and facing
                                 //   forward; the head's pose is ignored (unworn test runs draw the same view)
+    bool passthrough_fb = false;    // --passthrough-fb: (headset) passthrough through XR_FB_passthrough even where
+                                //   the runtime lists the ALPHA_BLEND blend mode (to test that path)
 };
 
 // The graphics the host applies while it runs (the menu's Graphics rows; the launch's are Options').
@@ -124,6 +126,18 @@ void request_graphics(const Graphics &g);
 bool take_graphics(Graphics &g);
 // The host's side: the headset found, then AppInfo::headset with the launch flags' values kept.
 void set_headset(const AppInfo &info, const Headset &h, Options &o);
+
+// Passthrough (mixed reality): the room through the headset's cameras wherever the eye picture's alpha is below 1
+// (premultiplied: the front clears to {0,0,0,0} and draws no sky there). Opt-in: off until a front asks, and a front
+// that never asks runs exactly as before. Known before AppInfo::headset is called: true when the runtime has a way,
+// the core ALPHA_BLEND blend mode, else XR_FB_passthrough (xr/xr_passthrough.cpp). False in the sim, and false again
+// if the runtime fails to start it (logged), so a front reads it every frame.
+bool passthrough_available();
+// The front asks for it on or off (any thread); the compositor takes it from the next submitted frame.
+void set_passthrough(bool on);
+// The host's side.
+void set_passthrough_available(bool available);
+bool passthrough_wanted();
 
 // The two hosts (app.cpp picks one).
 namespace xr { int run(const AppInfo &info, const Options &o); }

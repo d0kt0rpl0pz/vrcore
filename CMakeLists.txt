@@ -165,6 +165,7 @@ if(ANDROID)
         host/xr/xr_actions.cpp
         host/xr/xr_layers.cpp
         host/xr/xr_meta.cpp
+        host/xr/xr_passthrough.cpp
         host/xr/xr_swapchain.cpp
         host/audio/decode_android.cpp)
 else()

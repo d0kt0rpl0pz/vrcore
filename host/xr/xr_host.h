@@ -44,6 +44,14 @@ struct Extensions {
     bool touch_plus = false;            // XR_META_touch_controller_plus (the Quest 3's controllers' profile)
     bool frame_controller = false;      // XR_VALVE_frame_controller_interaction
     bool layer_settings = false;        // XR_FB_composition_layer_settings (sharpening)
+    bool fb_passthrough = false;        // XR_FB_passthrough (passthrough where the core ALPHA_BLEND is not listed)
+};
+
+// How passthrough reaches the compositor (xr_passthrough.cpp), picked once the system is known.
+enum class Passthrough {
+    None,                               // no way: passthrough_available() false
+    AlphaBlend,                         // core OpenXR: the frame ends with XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND
+    FB,                                 // XR_FB_passthrough: its layer first, under everything, the blend mode opaque
 };
 
 struct Host {
@@ -76,6 +84,14 @@ struct Host {
     PFN_xrPerfSettingsSetPerformanceLevelEXT set_performance_level = nullptr;
     PFN_xrSetAndroidApplicationThreadKHR set_thread = nullptr;
     PFN_xrConvertTimeToTimespecTimeKHR time_to_timespec = nullptr;
+    PFN_xrCreatePassthroughFB create_passthrough = nullptr;
+    PFN_xrDestroyPassthroughFB destroy_passthrough = nullptr;
+    PFN_xrPassthroughStartFB passthrough_start = nullptr;
+    PFN_xrPassthroughPauseFB passthrough_pause = nullptr;
+    PFN_xrCreatePassthroughLayerFB create_passthrough_layer = nullptr;
+    PFN_xrDestroyPassthroughLayerFB destroy_passthrough_layer = nullptr;
+    PFN_xrPassthroughLayerResumeFB passthrough_layer_resume = nullptr;
+    PFN_xrPassthroughLayerPauseFB passthrough_layer_pause = nullptr;
 
     // the eye swapchain: one, two layers
     XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -95,6 +111,10 @@ struct Host {
     uint32_t recentres = 0;             // LOCAL space change events (the headset's recentre)
     float refresh_hz = 0;               // in force (0: unknown)
     int foveation = -1;                 // in force (-1: none)
+    Passthrough passthrough = Passthrough::None;    // the way picked (passthrough_pick)
+    bool passthrough_on = false;        // in force: the front asked and it started
+    XrPassthroughFB fb_passthrough = XR_NULL_HANDLE;            // FB: made the first time it is turned on
+    XrPassthroughLayerFB fb_passthrough_layer = XR_NULL_HANDLE;
     float eye_pending = 0;              // an eye resolution asked for, made at eye_at (steady seconds); 0: none
     double eye_at = 0;
 };
@@ -126,6 +146,20 @@ bool actions_attach(Host &h);               // after the session: attached, the 
 void actions_sync(Host &h, XrTime t);       // each frame after xrWaitFrame (unfocused: the hands zero)
 void actions_profile_changed(Host &h);      // XrEventDataInteractionProfileChanged: logged
 void actions_destroy(Host &h);
+
+// xr_passthrough.cpp (app.h's passthrough)
+// After the system: the blend modes listed and XR_FB_passthrough, the way picked and logged (one line), and
+// app.h's passthrough_available set.
+void passthrough_pick(Host &h);
+// Each frame before xrEndFrame, the session running: the front's ask applied (FB: started or paused). On: the
+// FB layer pushed into `layers` (which must be empty: it goes under everything) and true returned, so the caller
+// gives the eye layer its alpha; `mode` the blend mode to end the frame with.
+bool passthrough_frame(Host &h, std::vector<const XrCompositionLayerBaseHeader *> &layers,
+                       XrEnvironmentBlendMode &mode);
+// xrEndFrame refused a frame with passthrough in it (a runtime that lists ALPHA_BLEND but will not take it): logged,
+// unavailable from now on; the caller ends the frame again without it.
+void passthrough_failed(Host &h, XrResult r);
+void passthrough_destroy(Host &h);          // before the session goes
 
 // xr_meta.cpp
 void meta_load(Host &h);                // the extension entry points

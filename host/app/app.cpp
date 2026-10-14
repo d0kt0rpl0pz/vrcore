@@ -34,6 +34,8 @@ std::atomic<bool> g_restart{false};
 Headset g_headset;
 Graphics g_graphics_ask;                // the front's newest ask (one thread: the front asks from update)
 bool g_graphics_asked = false;
+std::atomic<bool> g_passthrough_available{false};   // the host found a way (xr_passthrough.cpp); never in the sim
+std::atomic<bool> g_passthrough_wanted{false};      // the front's ask
 
 // the graphics a launch flag gave (set_headset keeps them over a device profile)
 enum : unsigned { kFlagHz = 1, kFlagEye = 2, kFlagFoveation = 4, kFlagSharpen = 8 };
@@ -53,6 +55,7 @@ bool parse(const AppInfo &info, Options &o, int argc, char **argv)
         if (!std::strcmp(a, "--soundtrack-probe")) { o.soundtrack_probe = true; continue; }
         if (!std::strcmp(a, "--graphics-test")) { o.graphics_test = true; continue; }
         if (!std::strcmp(a, "--head-lock")) { o.head_lock = true; continue; }
+        if (!std::strcmp(a, "--passthrough-fb")) { o.passthrough_fb = true; continue; }
         bool known = false;
         for (const char *k : kValued) known |= !std::strcmp(a, k);
         if (!known) {
@@ -88,9 +91,9 @@ bool parse(const AppInfo &info, Options &o, int argc, char **argv)
 #ifdef __ANDROID__
     if (o.shot || o.headless) log("app: --shot / --headless are for the sim; ignored on the headset");
 #else
-    if (o.pick_test || o.foveation_cycle > 0 || o.cpu_level >= 0 || o.gpu_level >= 0)
-        log("app: --pick-test / --foveation-cycle / --cpu-level / --gpu-level are for the headset; "
-            "ignored in the sim");
+    if (o.pick_test || o.foveation_cycle > 0 || o.cpu_level >= 0 || o.gpu_level >= 0 || o.passthrough_fb)
+        log("app: --pick-test / --foveation-cycle / --cpu-level / --gpu-level / --passthrough-fb are for the "
+            "headset; ignored in the sim");
 #endif
     if (o.foveation < 0 || o.foveation > 3) o.foveation = 2;
     if (o.sharpen < 0 || o.sharpen > 2) o.sharpen = 0;
@@ -205,6 +208,26 @@ bool take_graphics(Graphics &g)
     g_graphics_asked = false;
     g = g_graphics_ask;
     return true;
+}
+
+bool passthrough_available()
+{
+    return g_passthrough_available.load();
+}
+
+void set_passthrough(bool on)
+{
+    g_passthrough_wanted = on;
+}
+
+void set_passthrough_available(bool available)
+{
+    g_passthrough_available = available;
+}
+
+bool passthrough_wanted()
+{
+    return g_passthrough_wanted.load();
 }
 
 bool quit_requested(int *code)

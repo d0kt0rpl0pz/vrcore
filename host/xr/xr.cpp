@@ -212,6 +212,7 @@ bool instance_create(Host &h)
     h.ext.touch_plus = optional(XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME);
     h.ext.frame_controller = optional("XR_VALVE_frame_controller_interaction");
     h.ext.layer_settings = optional(XR_FB_COMPOSITION_LAYER_SETTINGS_EXTENSION_NAME);
+    h.ext.fb_passthrough = optional(XR_FB_PASSTHROUGH_EXTENSION_NAME);     // logged with the blend modes
     log("openxr: optional: refresh rate %d, foveation %d (update state %d, foveation %d, configuration %d, "
         "vulkan %d), performance settings %d, thread settings %d, timespec %d, touch plus %d, frame controller %d, "
         "layer settings %d",
@@ -497,6 +498,8 @@ bool frame(Host &h, Stats &st, bool &rendered)
     static std::vector<XrCompositionLayerQuad> quads, under;
     static std::vector<const XrCompositionLayerBaseHeader *> layers;
     layers.clear();
+    XrEnvironmentBlendMode blend = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    bool passthrough = false;
     bool fatal = false;
 
     if (fs.shouldRender) {
@@ -551,6 +554,8 @@ bool frame(Host &h, Stats &st, bool &rendered)
             layer.viewCount = 2;
             layer.views = pviews;
         }
+        // passthrough (app.h, xr_passthrough.cpp): the FB layer first, under everything, or the ALPHA_BLEND mode
+        passthrough = passthrough_frame(h, layers, blend);
         // the front's quad layers (app/layers.h): the underlays under the eyes' picture, which is then blended by
         // its alpha (premultiplied: layer_punch's holes are transparent black), the rest over it; on their own when
         // the eyes were not drawn (tracking lost, an eye image dropped): they keep their last released image
@@ -558,7 +563,7 @@ bool frame(Host &h, Stats &st, bool &rendered)
         for (const XrCompositionLayerQuad &q : under)
             layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader *>(&q));
         if (rendered) {
-            layer.layerFlags = under.empty() ? 0 : XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            layer.layerFlags = under.empty() && !passthrough ? 0 : XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
             layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader *>(&layer));
         }
         for (const XrCompositionLayerQuad &q : quads)
@@ -567,10 +572,22 @@ bool frame(Host &h, Stats &st, bool &rendered)
 
     XrFrameEndInfo ei = {XR_TYPE_FRAME_END_INFO};
     ei.displayTime = fs.predictedDisplayTime;
-    ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    ei.environmentBlendMode = blend;
     ei.layerCount = (uint32_t)layers.size();
     ei.layers = layers.data();
-    VRCORE_XR(xrEndFrame(h.session, &ei), false);
+    XrResult er = xrEndFrame(h.session, &ei);
+    if (XR_FAILED(er) && passthrough) {     // passthrough refused: the frame again as before it, opaque
+        passthrough_failed(h, er);
+        if (!layers.empty() && layers[0]->type == XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB) layers.erase(layers.begin());
+        ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        ei.layerCount = (uint32_t)layers.size();
+        ei.layers = layers.data();
+        er = xrEndFrame(h.session, &ei);
+    }
+    if (XR_FAILED(er)) {
+        log("openxr: xrEndFrame failed: %d", (int)er);
+        return false;
+    }
     if (fatal) return false;
 
     st.wait += t1 - t0;
@@ -647,6 +664,7 @@ void teardown(Host &h)
     if (h.dev.device) gpu::eye_target_destroy(h.dev, h.target);
     swapchain_destroy(h);
     actions_destroy(h);
+    passthrough_destroy(h);
     if (h.local) xrDestroySpace(h.local);
     if (h.session) xrDestroySession(h.session);
     gpu::device_destroy(h.dev);
@@ -661,6 +679,7 @@ int run_host(Host &h)
 {
     std::string system_name;
     if (!loader_init(h) || !instance_create(h) || !system_get(h, system_name) || !actions_create(h)) return 1;
+    passthrough_pick(h);                    // before the front's headset call: passthrough_available() known
 
     gpu::DeviceHooks hooks;
     hooks.want_fdm = h.ext.foveation;

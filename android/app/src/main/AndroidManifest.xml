@@ -11,6 +11,9 @@
     <!-- Hand tracking: declared optional, so Horizon does not ask for
          controllers at launch (pads need none). Not used: v1 has no hand tracking. -->
     <uses-feature android:name="oculus.software.handtracking" android:required="false" />
+    <!-- Passthrough (app.h's set_passthrough): Meta's runtime enables its passthrough only with this. Optional, and
+         off until a front asks for it -->
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The player's own music in Music/Soundtracks (audio/library.h): asked when the soundtrack page first
          needs it, never at launch -->
