@@ -16,6 +16,7 @@
 #include "log.h"
 #include "../audio/audio.h"
 #include "../audio/audio_test.h"
+#include "../audio/library.h"
 #include "../rig/rig_test.h"
 #include "settings.h"
 #ifndef __ANDROID__
@@ -49,6 +50,7 @@ bool parse(const AppInfo &info, Options &o, int argc, char **argv)
         if (!std::strcmp(a, "--fdm-view")) { o.fdm_view = true; continue; }
         if (!std::strcmp(a, "--headless")) { o.headless = true; continue; }
         if (!std::strcmp(a, "--pick-test")) { o.pick_test = true; continue; }
+        if (!std::strcmp(a, "--soundtrack-probe")) { o.soundtrack_probe = true; continue; }
         if (!std::strcmp(a, "--graphics-test")) { o.graphics_test = true; continue; }
         if (!std::strcmp(a, "--head-lock")) { o.head_lock = true; continue; }
         bool known = false;
@@ -236,10 +238,10 @@ int run(const AppInfo &info, int argc, char **argv)
     if (o.settings_test) return settings::settings_test(o.settings_test);
 #endif
     audio::set_spatial(o.spatial);
-    log("%s: hz %.0f, eye x%.2f, foveation %d, sharpen %d, spatial sound %s%s%s%s", info.name, o.hz,
+    log("%s: hz %.0f, eye x%.2f, foveation %d, sharpen %d, spatial sound %s%s%s%s%s", info.name, o.hz,
         o.eye_scale, o.foveation, o.sharpen, o.spatial ? "on" : "off",
         o.foveation_cycle > 0 ? " (cycling)" : "", o.fdm_view ? ", density view" : "",
-        o.pick_test ? ", pick test" : "");
+        o.pick_test ? ", pick test" : "", o.soundtrack_probe ? ", soundtrack probe" : "");
 
 #ifdef __ANDROID__
     // The XR session's state drives the loop. SDL would otherwise block SDL_main inside its event pump
@@ -259,6 +261,7 @@ int run(const AppInfo &info, int argc, char **argv)
     int rc = sim::run(info, o);
 #endif
     audio::close();             // the front closes it before its game stops; this only if it did not
+    audio::library::shutdown();
     SDL_Quit();
     log("%s: done (%d)", info.name, rc);
     return rc;

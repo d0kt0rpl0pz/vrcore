@@ -1,6 +1,6 @@
 /*
  * audio.cpp -- the SDL stream, the block loop on SDL's audio thread, the listener's seqlock and the stats
- * (audio.h).
+ * (audio.h). Each block ends with the soundtrack's music added (soundtrack.h), spatial or not.
  */
 #include "audio.h"
 
@@ -16,6 +16,7 @@
 #endif
 
 #include "../app/log.h"
+#include "soundtrack.h"
 #include "spatial.h"
 
 namespace vrcore::audio {
@@ -90,7 +91,9 @@ const Pose &read_listener()
 }
 
 // One block as the callback makes it: off, the game's stereo pulled as it is; on, the layout's channels pulled, the
-// speakers through Steam Audio and the direct channels added, clamped to +-1. The audio thread's (or a test's).
+// speakers through Steam Audio and the direct channels added, clamped to +-1. Then the soundtrack added, locked to
+// the head like the direct channels (when it is silent the block is left as it was). The audio thread's (or a
+// test's).
 const float *next_block(Pull pull, bool on, const Pose &head)
 {
     const int width = on ? g.layout.channels : kChannels;
@@ -100,7 +103,10 @@ const float *next_block(Pull pull, bool on, const Pose &head)
         g.short_pulls.fetch_add(1, std::memory_order_relaxed);
     }
     g.blocks.fetch_add(1, std::memory_order_relaxed);
-    if (!on) return g.in;
+    if (!on) {
+        soundtrack::mix(g.in, kBlock);
+        return g.in;
+    }
     int64_t t0 = steady_ns();
     g.fx.process(g.in, g.out, head);
     uint64_t ns = (uint64_t)(steady_ns() - t0);
@@ -117,6 +123,7 @@ const float *next_block(Pull pull, bool on, const Pose &head)
     for (uint64_t mx = g.fx_max_ns.load(std::memory_order_relaxed);
          ns > mx && !g.fx_max_ns.compare_exchange_weak(mx, ns, std::memory_order_relaxed);) {
     }
+    soundtrack::mix(g.out, kBlock);
     return g.out;
 }
 
@@ -190,6 +197,7 @@ bool open(int *hz)
     SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(g.stream), &dev, &frames);
     g.hz = spec.freq;
     g.device_frames = frames;
+    soundtrack::set_rate(g.hz);
     *hz = g.hz;
     log("audio: %s, %d Hz (device %d Hz, %d ch, %d frames a buffer), blocks of %d", SDL_GetCurrentAudioDriver(),
         g.hz, dev.freq, dev.channels, frames, kBlock);
@@ -258,6 +266,7 @@ bool test_start(int hz, Pull pull, const Layout &layout, const Speaker *speakers
 {
     g.hz = hz;
     g.pull = pull;
+    soundtrack::set_rate(hz);
     set_layout(layout);
     return g.fx.ready() || g.fx.init(hz, g.layout.channels, speakers, std::min(n, kMaxSpeakers));
 }
@@ -274,6 +283,8 @@ void close()
         SDL_DestroyAudioStream(g.stream);       // the device closed with it: the callback has returned
         g.stream = nullptr;
     }
+    soundtrack::shutdown();                     // after the device: mix can no longer run
+    soundtrack::set_rate(0);
     g.pull = nullptr;
     g.fx.shutdown();
     if (g.sdl_up) SDL_QuitSubSystem(SDL_INIT_AUDIO);

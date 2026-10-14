@@ -4,7 +4,8 @@
  * then spatialised: the pulled stream's channels (Layout) are speakers fixed in the SEAT's frame, rendered
  * binaurally by Steam Audio for the head's pose in that frame (spatial.h), and DIRECT channels, straight to the
  * ears (locked to the head: Daytona's music). Off (set_spatial(false)): the stream is pulled 2 wide, the game's
- * own stereo mix, and goes out as it is, bit for bit.
+ * own stereo mix, and goes out as it is, bit for bit. Either way the player's own music (soundtrack.h) is added
+ * last, locked to the head, while it plays; silent, it leaves the block alone.
  *
  * THE ORDER: open (the device paused, its rate known: vr_start's audio_hz) -> the game started -> start (the pull
  * and the speakers given, the device resumed) -> listener every update -> close (the device closed: the callback

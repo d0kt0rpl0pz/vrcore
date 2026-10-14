@@ -126,13 +126,17 @@ add_library(vrcore_host STATIC
     host/app/pacing.cpp
     host/app/pads.cpp
     host/app/picker_test.cpp
+    host/app/soundtrack_probe.cpp
     host/app/plugin.cpp
     host/app/roms.cpp
     host/app/selftest.cpp
     host/app/settings.cpp
     host/app/soak.cpp
     host/audio/audio.cpp
+    host/audio/library.cpp
+    host/audio/soundtrack.cpp
     host/audio/spatial.cpp
+    host/audio/storage.cpp
     host/rig/rig.cpp
     host/rig/rumble.cpp
     host/rig/shifter.cpp
@@ -161,8 +165,10 @@ if(ANDROID)
         host/xr/xr_actions.cpp
         host/xr/xr_layers.cpp
         host/xr/xr_meta.cpp
-        host/xr/xr_swapchain.cpp)
+        host/xr/xr_swapchain.cpp
+        host/audio/decode_android.cpp)
 else()
+    target_sources(vrcore_host PRIVATE host/audio/decode_apple.cpp)
     target_sources(vrcore_host PRIVATE host/rig/rig_test.cpp host/audio/audio_test.cpp host/app/settings_test.cpp host/sim/sim.cpp host/sim/sim_layers.cpp)
     find_library(VRCORE_MOLTENVK NAMES MoltenVK HINTS /opt/homebrew/lib /usr/local/lib)
     if(NOT VRCORE_MOLTENVK)
@@ -196,7 +202,7 @@ target_link_libraries(vrcore_host PUBLIC SDL3::SDL3 vrcore_phonon ${CMAKE_DL_LIB
 if(ANDROID)
     target_compile_options(vrcore_host PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
     target_compile_definitions(vrcore_host PRIVATE XR_USE_PLATFORM_ANDROID XR_USE_GRAPHICS_API_VULKAN XR_USE_TIMESPEC)
-    target_link_libraries(vrcore_host PUBLIC openxr_loader log android aaudio)
+    target_link_libraries(vrcore_host PUBLIC openxr_loader log android aaudio mediandk)
 endif()
 # Third-party sources in the host library are not ours to warn about.
 set_source_files_properties(${VRCORE_EXTERN_DIR}/volk/volk.c host/gpu/vk_impl.cpp host/rig/cgltf_impl.cpp
@@ -205,6 +211,10 @@ set_source_files_properties(${VRCORE_EXTERN_DIR}/volk/volk.c host/gpu/vk_impl.cp
                             PROPERTIES COMPILE_OPTIONS -w)
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     target_link_libraries(vrcore_host PUBLIC m)
+endif()
+if(APPLE)
+    # the soundtrack's decoder (audio/decode_apple.cpp)
+    target_link_libraries(vrcore_host PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")
 endif()
 if(NOT MSVC)
     target_compile_options(vrcore_host PRIVATE -Wall -Wextra -Wno-missing-field-initializers)

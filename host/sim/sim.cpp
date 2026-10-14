@@ -31,6 +31,7 @@
 #include "../app/input_host.h"
 #include "../app/log.h"
 #include "../app/shots.h"
+#include "../app/soundtrack_probe.h"
 #include "../gpu/device.h"
 #include "../gpu/eye_target.h"
 #include "../gpu/vmath.h"
@@ -669,6 +670,7 @@ void Sim::update(int64_t display_ns)
         t.recentres = recentres;
         info->update(t);
     }
+    if (opt->soundtrack_probe) soundtrack_probe_poll(steady_ns() * 1e-9);
     if (quit_requested()) quit = true;
     else if (take_restart()) {          // app.h's request_restart: the front again from its start, same window
         vkDeviceWaitIdle(dev.device);

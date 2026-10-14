@@ -20,6 +20,7 @@
 #include "../app/input_host.h"
 #include "../app/log.h"
 #include "../app/picker_test.h"
+#include "../app/soundtrack_probe.h"
 #include "../app/shots.h"
 
 namespace vrcore::xr {
@@ -617,6 +618,7 @@ int loop(Host &h)
             cycle_at = now + h.opt->foveation_cycle;
             foveation_set(h, (h.foveation + 1) % 4);
         }
+        if (h.opt->soundtrack_probe && total_rendered && now - first_render > 3.0) soundtrack_probe_poll(now);
         if (h.opt->pick_test && !pick_started && total_rendered && now - first_render > 3.0) {
             pick_started = true;
             picker_test_start();

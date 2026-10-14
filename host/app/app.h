@@ -31,6 +31,8 @@ struct Options {
     const char *shot = nullptr; // --shot FILE: (sim) write the left eye as a PPM at the last frame
     bool headless = false;      // --headless: (sim) no window; implied by --shot
     bool pick_test = false;     // --pick-test: open SDL's file dialog and log what it gives
+    bool soundtrack_probe = false;  // --soundtrack-probe: scan, ask, pick and play the player's music, logged
+                                //   (app/soundtrack_probe.h)
     const char *rig_test = nullptr; // --rig-test DIR: (Mac) run the rig's device-free checks into DIR, then quit:
                                 //   exit 0 = all passed
     const char *audio_test = nullptr;   // --audio-test DIR: (Mac) the sound's device-free checks, the same way
