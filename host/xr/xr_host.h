@@ -101,6 +101,16 @@ struct Host {
     std::vector<XrSwapchainImageVulkanKHR> images;
     std::vector<XrSwapchainImageFoveationVulkanFB> fdm_images;
 
+    // the overlay (app/layers.h, xr_layers.cpp): a second eye swapchain, the eyes' size, format and density maps,
+    // made on its first ask; its own eye target, so the eye pipelines draw on it
+    XrSwapchain overlay = XR_NULL_HANDLE;
+    std::vector<XrSwapchainImageVulkanKHR> overlay_images;
+    std::vector<XrSwapchainImageFoveationVulkanFB> overlay_fdm_images;
+    gpu::EyeTarget overlay_target;
+    bool overlay_failed = false;        // could not be made: not tried again until the eyes are made again
+    bool overlay_acquired = false;      // an image held for this frame (released after the submit)
+    bool overlay_drawn = false;         // and drawn: its layer goes out this frame
+
     gpu::Device dev;
     gpu::EyeTarget target;
     gpu::RendererImpl r;
@@ -139,6 +149,14 @@ void layers_bind(Host &h);                  // the session the layers are made i
 void layers_release(Host &h);               // after the frame's submit: the images drawn this frame
 // those up, in the order made: the underlays (under the projection layer) and the rest (over it)
 void layers_compose(Host &h, std::vector<XrCompositionLayerQuad> &under, std::vector<XrCompositionLayerQuad> &over);
+// After the eye pass, before the submit: the overlay's draws asked for this frame, in their own pass on the overlay
+// (made on the first ask); none asked: nothing. layers_release releases its image.
+void overlay_render(Host &h, gpu::Frame &f);
+// Before xrEndFrame: the overlay's projection layer, its views the eyes' (as drawn), when it was drawn this frame
+// (then true, and `layer` goes last, over the quads).
+bool overlay_compose(Host &h, const XrCompositionLayerProjectionView eyes[2], XrCompositionLayerProjection &layer,
+                     XrCompositionLayerProjectionView views[2]);
+void overlay_destroy(Host &h);              // the GPU idle: before the eyes are made again, and at teardown
 
 // xr_actions.cpp (app/input.h's hands and head)
 bool actions_create(Host &h);               // after the instance: the action set, the profiles' bindings
@@ -166,7 +184,7 @@ void meta_load(Host &h);                // the extension entry points
 void meta_session_start(Host &h);       // refresh rate, performance levels, thread hint
 std::vector<float> meta_rates(Host &h); // the runtime's refresh rates as listed (a session made; empty: none)
 void refresh_set(Host &h);              // opt->hz: the listed rate nearest it (a tie the lower)
-bool foveation_set(Host &h, int level); // 0-3: Off, Low, Medium, High; dynamic off
+bool foveation_set(Host &h, int level); // 0-3: Off, Low, Medium, High; dynamic off (the overlay's too, when made)
 // The projection layer's settings for opt->sharpen (chained on it each frame); null for Off or no extension.
 const void *sharpen_settings(Host &h);
 void meta_event(Host &h, const XrEventDataBuffer &e);

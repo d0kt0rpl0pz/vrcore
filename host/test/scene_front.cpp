@@ -13,15 +13,24 @@
  * And a quad layer (app/layers.h, M2), 1 x 0.5 m up and left of the panel, redrawn every 30 frames: the same
  * checker over a half-transparent green, straight alpha. On the headset the compositor draws it; in the sim a
  * quad over everything.
+ *
+ * And the menu (ui/menu.h; Esc, Start or the left menu button) with the overlay (app/layers.h): while it is up, a
+ * yellow cube 10 cm across turns 0.5 m ahead of where the head was as it opened, between the eyes and the panel
+ * (1.1 m), drawn on the overlay with the scene's own lit pipeline. It must stand in front of the panel's text: in
+ * the eye pass the panel's quad layer would cover it. The menu's row turns it off, to compare. --menu opens the
+ * menu at the start (a headless --shot of it).
  */
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "../app/app.h"
 #include "../app/layers.h"
 #include "../app/log.h"
+#include "../app/input.h"
 #include "../gpu/render.h"
+#include "../ui/menu.h"
 
 namespace vrcore {
 
@@ -84,7 +93,77 @@ struct Scene {
     gpu::DynamicBuffer *panel = nullptr;
     gpu::Pipeline *offscreen = nullptr, *panel_pipe = nullptr, *tint = nullptr;
     Layer *layer = nullptr;
+    // the menu and the overlay's test cube
+    ui::Menu menu;
+    ui::Page top;
+    bool cube_on = true;
+    bool was_shown = false;
+    bool open_at_start = false;             // --menu
+    float cube_at[3] = {0, 0, 0};           // 0.5 m ahead of the head as the menu opened, 5 cm under the eyes
 } scene;
+
+constexpr float kCubeAhead = 0.5f, kCubeSize = 0.1f;
+
+void menu_build()
+{
+    ui::Item resume;
+    resume.label = "Resume";
+    resume.change = [](int) { scene.menu.close(); };
+    ui::Item cube;
+    cube.label = "Overlay test cube";
+    cube.value = [] { return std::string(scene.cube_on ? "On" : "Off"); };
+    cube.change = [](int) { scene.cube_on = !scene.cube_on; };
+    cube.help = "A cube on the overlay, between you and this panel: it must stand in front of the text.";
+    scene.top = {resume, cube};
+    scene.menu.set_top(&scene.top, "SCENE");
+}
+
+int scene_option(int, char **argv, int i)
+{
+    if (std::string(argv[i]) != "--menu") return 0;
+    scene.open_at_start = true;
+    return 1;
+}
+
+void scene_update(const Tick &t)
+{
+    const Input &in = input();
+    if (scene.open_at_start && in.head_tracked) {
+        scene.open_at_start = false;
+        scene.menu.open();
+    }
+    scene.menu.update(t, in);
+    bool shown = scene.menu.shown();
+    if (shown && !scene.was_shown) {
+        // the head's forward, level, as the menu places its panel
+        const Quat &q = in.head.rot;
+        float fx = -(2.f * (q.x * q.z + q.w * q.y)), fz = -(1.f - 2.f * (q.x * q.x + q.y * q.y));
+        float n = std::sqrt(fx * fx + fz * fz);
+        if (n < 1e-4f) fx = 0, fz = -1, n = 1;
+        scene.cube_at[0] = in.head.pos[0] + fx / n * kCubeAhead;
+        scene.cube_at[1] = in.head.pos[1] - 0.05f;
+        scene.cube_at[2] = in.head.pos[2] + fz / n * kCubeAhead;
+    }
+    scene.was_shown = shown;
+}
+
+void cube_overlay_draw(gpu::Frame &f)
+{
+    float spin = (float)f.time;
+    Push p;
+    p.model = mat4_translate(scene.cube_at[0], scene.cube_at[1], scene.cube_at[2]);
+    p.model = mat4_mul(p.model, mat4_rotate(quat_mul(quat_axis_angle(0, 1, 0, spin),
+                                                     quat_axis_angle(1, 0, 0, 0.6f))));
+    p.model = mat4_mul(p.model, mat4_scale(kCubeSize, kCubeSize, kCubeSize));
+    p.color[0] = 1.f;
+    p.color[1] = 0.9f;
+    p.color[2] = 0.1f;
+    p.color[3] = 1.f;
+    f.bind(scene.lit);
+    f.bind_vertices(scene.cube);
+    f.push(&p, sizeof p);
+    f.draw(scene.cube_count);
+}
 
 bool panel_init(gpu::Renderer &r)
 {
@@ -138,6 +217,9 @@ void panel_quad(PanelVertex *v, float cx, float cy, float z, float half)
 
 void scene_prepare(gpu::Frame &f)
 {
+    scene.menu.prepare(f);
+    if (scene.menu.shown() && scene.cube_on) overlay_draw(cube_overlay_draw);
+
     float scroll[4] = {(float)f.time * 2.f, (float)f.time, 0, 0};
     f.uniforms(scroll, sizeof scroll);
     auto *v = static_cast<PanelVertex *>(f.write(scene.panel, 12 * sizeof(PanelVertex)));
@@ -262,6 +344,8 @@ bool scene_init(gpu::Renderer &r, const Options &o)
     scene.flat = r.create_pipeline(d);
     log("scene: %u cube vertices, %u grid vertices (%u quads)%s", scene.cube_count, scene.grid_count,
         scene.grid_count / 6, fdm_view ? ", density view" : "");
+    if (!scene.menu.init(r, {})) return false;
+    menu_build();
     return scene.cube && scene.grid && scene.lit && scene.flat && panel_init(r);
 }
 
@@ -313,6 +397,7 @@ void scene_shutdown(gpu::Renderer &r)
     r.destroy_target(scene.target);
     r.destroy_dynamic_buffer(scene.panel);
     layer_destroy(r, scene.layer);
+    scene.menu.shutdown(r);
     scene = Scene();
 }
 
@@ -320,7 +405,7 @@ void scene_shutdown(gpu::Renderer &r)
 
 const AppInfo &front_info()
 {
-    static const AppInfo info = {"vrcore scene", scene_init, scene_draw, scene_shutdown, nullptr, nullptr,
+    static const AppInfo info = {"vrcore scene", scene_init, scene_draw, scene_shutdown, scene_option, scene_update,
                                  scene_prepare};
     return info;
 }

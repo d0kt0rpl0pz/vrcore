@@ -28,7 +28,7 @@ native/        C99 shared by the plugins and compiled into each one (also builds
 host/          the host: app (loop, plugin, pacing, settings, layers), xr, gpu, audio, rig, ui (menus), sim
 shaders/       the host's GLSL (compiled to SPIR-V by glslc at build time)
 android/       the Gradle project for the APK (SDL's activity, the file picker)
-assets/        the hand wheel's model and the licences packed into the APK
+assets/        the hand wheel's and the menu controllers' models and the licences packed into the APK
 tools/         fetch_extern.py (the pinned libraries), vr_plugin_test.c (headless plugin test),
                quest_install.sh / quest_bench.sh / quest_profile.py
 ```
@@ -48,13 +48,14 @@ camera for comfort and so you don't throw up).
 (render clock), `app/selftest.h` and `app/soak.h` (the timed self test and the soak test, with a front's hooks),
 `app/roms.h` (the ROM set checked against the optional `vr_roms`, its panel texts and the picked
 files), `app/headset.h` (which headset, its refresh rates), `rig/` (seat, free camera, wheel, stick, shifter,
-rumble), `ui/menu.h` (menus, the file picker), `ui/graphics.h` (the headset's Graphics rows and profiles), `xr/`
+rumble), `ui/menu.h` (menus: typed row builders, a controller pointer; the file picker), `ui/controllers.h` (the controller
+models and ray the menu draws), `ui/graphics.h` (the headset's Graphics rows and profiles), `xr/`
 (OpenXR session, refresh, foveation and resolution), `audio/` (sound and spatial speakers).
 
 ## Using it
 
 `docs/porting.md` walks through bringing a game to vrcore: the plugin contract, the front's hooks, smooth
-motion between game frames, building, and a step-by-step order for a new port.
+motion between game frames, the menu's row builders and pointer, building, and a step-by-step order for a new port.
 
 A game uses it in three places:
 
@@ -105,3 +106,7 @@ The steering wheel model (`assets/wheel.glb`, drawn by `host/rig/wheel_model.cpp
 
 "MOMO STEERING WHEEL" (https://skfb.ly/o9MyX) by ijiklvn is licensed under Creative Commons Attribution
 (http://creativecommons.org/licenses/by/4.0/).
+
+The controller models drawn in the menu (`assets/controller_left.glb`, `assets/controller_right.glb`, drawn by
+`host/ui/controllers.cpp`) are the generic trigger / squeeze / thumbstick controller of immersive-web/webxr-input-profiles
+(https://github.com/immersive-web/webxr-input-profiles), MIT, Copyright (c) 2019 Amazon (notice in `THIRD_PARTY.md`).

@@ -128,6 +128,7 @@ bool eye_remake(Host &h)
 {
     auto t0 = std::chrono::steady_clock::now();
     vkDeviceWaitIdle(h.dev.device);
+    overlay_destroy(h);                     // made again at the new size on its next ask
     gpu::eye_target_destroy(h.dev, h.target);
     bool fdm = h.swapchain_fdm;
     swapchain_destroy(h);

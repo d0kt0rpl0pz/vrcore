@@ -22,10 +22,23 @@
  * headset the projection layer is then blended by its alpha (premultiplied: the eye pass's clear and draws leave
  * alpha 1 elsewhere), only on frames with an underlay up. The sim (no compositor) draws the picture itself there,
  * with the depth test.
+ *
+ * THE OVERLAY is 3D drawn over every quad layer: what must never hide behind a panel (the hands and their rays
+ * while the menu is up, held nearer than its panel). On the headset it is a second projection layer, both eyes in
+ * their own multiview pass (as the eye pass: 4x MSAA, the same pipelines, the same Views), cleared to transparent
+ * black and composited last, premultiplied (what is drawn opaque covers, its edges blend). Its swapchain is made the
+ * first time it is asked for and kept; on frames it is not asked for nothing is drawn or submitted, so it costs
+ * nothing then. The sim (no compositor) draws it at the end of the eye pass, after the quad layers, its depth
+ * cleared first. Its depth is its own: it does not meet the game's.
+ *
+ *   in prepare, every frame it is wanted:   overlay_draw([](gpu::Frame &f) { f.bind(...); ... f.draw(...); });
+ *
+ * The draws run in the order given, in the overlay's pass, after the front's draw, then are forgotten.
  */
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 #include "gpu/render.h"
 #include "gpu/vmath.h"
@@ -55,5 +68,9 @@ void layer_crop(Layer *l, uint32_t width, uint32_t height);
 // An underlay's hole, in the eye pass (the front's draw, before what may stand in front of it), where it is placed
 // this frame; nothing when it is not up. Not for an overlay.
 void layer_punch(gpu::Frame &f, Layer *l);
+
+// The overlay this frame (in prepare): `draw` runs in its pass, binds and draws as in the front's draw (eye
+// pipelines). Asked for again every frame it is wanted.
+void overlay_draw(std::function<void(gpu::Frame &f)> draw);
 
 }

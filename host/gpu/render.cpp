@@ -460,6 +460,7 @@ void renderer_begin_eye_pass(RendererImpl &r, uint32_t image, const float clear_
     vkCmdSetViewport(s.cmd, 0, 1, &vp);
     vkCmdSetScissor(s.cmd, 0, 1, &sc);
     r.in_pass = RendererImpl::InPass::Eye;
+    r.eye_on = &t;
 }
 
 void renderer_end_pass(RendererImpl &r)
@@ -467,9 +468,25 @@ void renderer_end_pass(RendererImpl &r)
     RendererImpl::Slot &s = r.slots[r.slot];
     if (r.in_pass == RendererImpl::InPass::None) return;
     vkCmdEndRenderPass(s.cmd);
-    if (r.in_pass == RendererImpl::InPass::Eye && r.queries)
-        vkCmdWriteTimestamp(s.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r.queries, 2 * r.slot + 1);
     r.in_pass = RendererImpl::InPass::None;
+}
+
+void renderer_clear_depth(RendererImpl &r)
+{
+    if (r.in_pass != RendererImpl::InPass::Eye) return;
+    VkClearAttachment a = {};
+    a.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (r.eye_on->stencil) a.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    a.clearValue.depthStencil = {0.f, 0};               // reverse-Z: far; stencil 0, as the pass began
+    VkClearRect rect = {{{0, 0}, r.eye_on->extent}, 0, 1};  // multiview: layer 0 stands for every view
+    VkCommandBuffer cmd = r.slots[r.slot].cmd;
+    vkCmdClearAttachments(cmd, 1, &a, 1, &rect);
+    // MoltenVK clears with a draw of its own and the frame's sets 0 and 1 were lost after it (the next draws had no
+    // Views: nothing showed; Apple M5, 2026-10-15): bound again, with the viewport and scissor
+    VkViewport vp = {0, 0, (float)r.eye_on->extent.width, (float)r.eye_on->extent.height, 0.f, 1.f};
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+    vkCmdSetScissor(cmd, 0, 1, &rect.rect);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.layout, 0, 2, r.slots[r.slot].sets, 0, nullptr);
 }
 
 VkCommandBuffer renderer_cmd(const RendererImpl &r)
@@ -481,6 +498,8 @@ bool renderer_submit(RendererImpl &r, VkSemaphore wait, VkPipelineStageFlags wai
 {
     RendererImpl::Slot &s = r.slots[r.slot];
     if (r.in_pass != RendererImpl::InPass::None) renderer_end_pass(r);
+    // the frame's end, after every pass (the eye pass, and the overlay's when it has one)
+    if (r.queries) vkCmdWriteTimestamp(s.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r.queries, 2 * r.slot + 1);
     VRCORE_VK(vkEndCommandBuffer(s.cmd), false);
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     if (wait) {

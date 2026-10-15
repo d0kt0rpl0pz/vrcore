@@ -126,6 +126,10 @@ bool foveation_set(Host &h, int level)
     XrSwapchainStateFoveationFB state = {XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
     state.profile = profile;
     XrResult r = h.update_swapchain(h.swapchain, reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&state));
+    if (XR_SUCCEEDED(r) && h.overlay) {
+        XrResult o = h.update_swapchain(h.overlay, reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&state));
+        if (XR_FAILED(o)) log("openxr: xrUpdateSwapchainFB (overlay) failed: %d", (int)o);
+    }
     h.destroy_foveation_profile(profile);       // the swapchain keeps the level (XR_FB_foveation)
     if (XR_FAILED(r)) {
         log("openxr: xrUpdateSwapchainFB failed: %d", (int)r);

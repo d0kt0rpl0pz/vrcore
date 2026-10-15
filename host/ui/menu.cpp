@@ -39,6 +39,22 @@ const ImU32 kBack = IM_COL32(3, 3, 10, 245);                // (0.01, 0.01, 0.04
 // on two lines: the one line set most pages' width
 constexpr const char *kControlsLine[2] = {"move: stick   change: left/right or A", "back: B   close: menu"};
 
+// the same two lines for a pointer (a controller shows): widest() counts both, so nothing resizes with the switch
+constexpr const char *kPointerLine[2] = {"point and pull the trigger", "B back \xc2\xb7 menu close"};
+
+const ImU32 kGlow = IM_COL32(255, 255, 0, 16);              // a hovered row's wash
+const ImU32 kDot = IM_COL32(255, 255, 255, 255);
+constexpr float kDotPx = 0.008f * Menu::kPxPerM;            // the cursor's radius
+
+// THE ROW KINDS (menu.h): a glyph's width (the `<` `>` `v` and the page's `>`, drawn as shapes: the font has none), a
+// button's padding, and the parts of a row the pointer tells apart
+constexpr float kGlyphW = 0.42f * kFontPx;
+constexpr float kBtnPad = 0.28f * kFontPx;
+enum Zone { kNoZone = 0, kDec, kInc, kReset, kConfirm, kValue };
+const ImU32 kBtn = IM_COL32(30, 70, 64, 255);               // a button, at rest
+const ImU32 kBtnHot = IM_COL32(60, 120, 108, 255);          // under the ray
+const ImU32 kDropBack = IM_COL32(14, 24, 28, 255);
+
 double steady_s()
 {
     return SDL_GetTicksNS() * 1e-9;
@@ -50,6 +66,15 @@ Quat yaw_quat(float yaw)
 }
 
 // a point in the panel's own space (x right, y up, +z towards you) to the room
+// a vector turned by a unit quaternion
+void rotate(const Quat &q, float x, float y, float z, float out[3])
+{
+    float tx = 2.f * (q.y * z - q.z * y), ty = 2.f * (q.z * x - q.x * z), tz = 2.f * (q.x * y - q.y * x);
+    out[0] = x + q.w * tx + (q.y * tz - q.z * ty);
+    out[1] = y + q.w * ty + (q.z * tx - q.x * tz);
+    out[2] = z + q.w * tz + (q.x * ty - q.y * tx);
+}
+
 void panel_point(const float pos[3], float yaw, float x, float y, float z, float out[3])
 {
     float c = std::cos(yaw), s = std::sin(yaw);
@@ -66,11 +91,17 @@ struct Menu::Line {
         ImU32 col;
         bool bold;
         float x = -1;                       // >= 0: starts at this column (the values'), past the line's start
+        int glyph = 0;                      // 1 `<`, 2 `>`, 3 `v`, drawn as a shape of width w (text empty)
+        int zone = 0;                       // Zone: what a click on it does (menu.cpp), and what lights under the ray
+        bool button = false;                // drawn as a button round its text
+        float w = -1;                       // >= 0: its width (else the text's)
+        float lead = 0;                     // empty room before it
     };
     std::vector<Seg> segs;
     ImFont *font = nullptr;
     float size = kFontPx;
     float pitch = kPitch;
+    int row = -1;                           // the visible row it is (-1: not one)
 };
 
 bool Menu::init(gpu::Renderer &r, const Hooks &hooks, std::vector<Box> boxes)
@@ -113,6 +144,7 @@ bool Menu::init(gpu::Renderer &r, const Hooks &hooks, std::vector<Box> boxes)
     box_layers_.resize(boxes_.size());
     for (size_t i = 0; i < boxes_.size(); ++i)
         ok &= make(box_layers_[i], boxes_[i].max_width, boxes_[i].max_height, kCanvas * (3 + i), boxes_[i].left);
+    models_.init(r);                        // not fatal: the menu works with no controllers drawn
     log("ui: menu %s, %.0f px a metre, layers %s", ok ? "ready" : "NOT ready", kPxPerM, ok ? "made" : "missing");
     return ok;
 }
@@ -123,6 +155,7 @@ void Menu::shutdown(gpu::Renderer &r)
     layer_destroy(r, legend_.layer);
     layer_destroy(r, note_.layer);
     for (Drawn &d : box_layers_) layer_destroy(r, d.layer);
+    models_.shutdown(r);
     box_layers_.clear();
     panel_ = legend_ = note_ = Drawn();
     if (render_) {
@@ -145,6 +178,9 @@ void Menu::set_top(Page *top, const char *title)
 
 void Menu::enter(Item &it)
 {
+    disarm(page_);
+    button_focus_ = false;
+    dropdown_ = -1;
     stack_.push_back({page_, page_title_, sel_});
     page_ = it.sub;
     std::string up = it.label;
@@ -173,6 +209,9 @@ void Menu::back()
         close();
         return;
     }
+    disarm(page_);
+    button_focus_ = false;
+    dropdown_ = -1;
     page_ = stack_.back().page;
     page_title_ = stack_.back().title;
     sel_ = stack_.back().sel;
@@ -185,11 +224,16 @@ void Menu::open()
     if (open_ || !top_ || (hooks_.can_open && !hooks_.can_open())) return;
     open_ = true;
     if (hooks_.on_open) hooks_.on_open();
+    disarm(page_);
+    button_focus_ = false;
+    dropdown_ = -1;
     stack_.clear();
     page_ = top_;
     page_title_ = top_title_;
     restart_yes_ = false;
     sel_ = 0;
+    quads_.clear();
+    hit_id_ = hover_row_ = -1;
     repeat_at_ = now_ + 0.3;
     placed_ = false;                        // placed in front of the head this update
     menu_w_ = 0;                            // measured again (SIZES)
@@ -200,6 +244,9 @@ void Menu::close()
 {
     if (!open_) return;
     open_ = false;
+    disarm(page_);
+    button_focus_ = false;
+    dropdown_ = -1;
     if (hooks_.on_close) hooks_.on_close();
 }
 
@@ -219,6 +266,117 @@ Item Menu::restart_item(std::function<void()> saved, bool gap)
     it.gap = gap;
     it.help = "Starts the game again from power-on, with the Gameplay settings applied. Set it to Yes, then press A.";
     return it;
+}
+
+Item Menu::return_item()
+{
+    Item it;
+    it.label = "Return";
+    it.kind = Kind::Return;
+    it.change = [this](int d) {
+        if (d > 0) back();
+    };
+    return it;
+}
+
+// ---- the row builders (menu.h THE ROW KINDS): the old fields filled so the d-pad does what it always did ----
+
+Item toggle(const std::string &label, std::function<bool()> get, std::function<void(bool)> set, const char *on_text,
+            const char *off_text)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Toggle;
+    it.value = [get, on_text, off_text] { return std::string(get() ? on_text : off_text); };
+    it.change = [get, set](int) { set(!get()); };
+    return it;
+}
+
+Item choice(const std::string &label, std::vector<std::string> labels, std::function<int()> get,
+            std::function<void(int)> set)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Choice;
+    it.choices = labels;
+    it.index = get;
+    it.pick = set;
+    const int n = (int)labels.size();
+    it.value = [labels, get] {
+        int i = get();
+        return i >= 0 && i < (int)labels.size() ? labels[i] : std::string();
+    };
+    it.change = [get, set, n](int d) {
+        if (n > 0) set(((get() + d) % n + n) % n);
+    };
+    return it;
+}
+
+Item stepper(const std::string &label, std::function<float()> get, std::function<void(float)> set, float step,
+             float lo, float hi, std::function<std::string(float)> format, std::function<void()> reset)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Stepper;
+    it.value = [get, format] { return format(get()); };
+    it.change = [get, set, step, lo, hi](int d) {
+        float v = (std::nearbyint(get() / step) + (float)d) * step;
+        set(v < lo ? lo : v > hi ? hi : v);
+    };
+    if (reset) {
+        it.reset = reset;
+        it.press = reset;
+    }
+    return it;
+}
+
+Item action(const std::string &label, std::function<void()> run)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Action;
+    it.change = [run](int d) {
+        if (d > 0 && run) run();
+    };
+    return it;
+}
+
+Item page(const std::string &label, Page &sub)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Page;
+    it.sub = &sub;
+    return it;
+}
+
+Item confirm(const std::string &label, std::function<void()> run)
+{
+    Item it;
+    it.label = label;
+    it.kind = Kind::Confirm;
+    it.run = run;
+    auto armed = std::make_shared<bool>(false);
+    it.armed = armed;
+    it.value = [armed] { return std::string(*armed ? "Yes" : "No"); };
+    it.change = [armed](int) { *armed = !*armed; };
+    return it;
+}
+
+// Confirm rows back to No (leaving the row or the page); `except` keeps one
+void Menu::disarm(Page *p, const Item *except)
+{
+    if (!p) return;
+    for (Item &it : *p)
+        if (it.armed && &it != except) *it.armed = false;
+}
+
+void Menu::run_confirm(Item &it)
+{
+    std::function<void()> run = it.run;     // the page may be gone when it returns
+    if (it.armed) *it.armed = false;
+    button_focus_ = false;
+    if (run) run();
 }
 
 // ---- every update ----
@@ -265,6 +423,25 @@ void Menu::update(const Tick &t, const Input &in)
         pads_now.push_back({p.id, p.south, p.east, p.start});
     }
     pads_was_ = pads_now;
+    // THE CONTROLLERS drawn (prepare): the rule's shown hands; the ray from the pointing one (as point picks it)
+    {
+        int ray = in.controller_shown(Input::kRight) && in.hands[Input::kRight].aim_tracked ? Input::kRight
+                : in.controller_shown(Input::kLeft) && in.hands[Input::kLeft].aim_tracked ? Input::kLeft : -1;
+        for (int h = 0; h < 2; ++h) {
+            ControllerModels::Draw &c = ctl_[h];
+            c.shown = in.controller_shown(h);
+            c.grip = in.hands[h].grip;
+            c.aim = in.hands[h].aim;
+            c.ray = h == ray;
+        }
+    }
+    // the triggers' edges (on at 0.6, off under 0.4)
+    for (int h = 0; h < 2; ++h) {
+        float v = in.hands[h].trigger;
+        bool now = trigger_was_[h] ? v > 0.4f : v > 0.6f;
+        trigger_pressed_[h] = now && !trigger_was_[h];
+        trigger_was_[h] = now;
+    }
     bool select = in.pressed[SDL_SCANCODE_RETURN] || in.pressed[SDL_SCANCODE_KP_ENTER] ||
                   in.pressed[SDL_SCANCODE_SPACE] || pad_south || hand_pressed[0][0] || hand_pressed[1][0];
     bool back_pressed = in.pressed[SDL_SCANCODE_BACKSPACE] || pad_east || hand_pressed[0][1] || hand_pressed[1][1];
@@ -283,6 +460,7 @@ void Menu::update(const Tick &t, const Input &in)
         if (hooks_.pick) hooks_.pick(select);
         if (!showing_message_ || !placed_) place(in);
         showing_message_ = true;
+        hit_id_ = hover_row_ = -1;          // no pointer on it: the ray runs free
         return;
     }
     showing_message_ = false;
@@ -291,7 +469,11 @@ void Menu::update(const Tick &t, const Input &in)
         if (open_) close();
         else open();
     }
-    if (!open_) return;
+    if (!open_) {
+        hit_id_ = hover_row_ = pointing_ = -1;
+        pointer_hint_ = false;
+        return;
+    }
     if (!placed_) place(in);
 
     visible_.clear();
@@ -300,6 +482,64 @@ void Menu::update(const Tick &t, const Input &in)
     if (visible_.empty()) return;
     if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
     if (sel_ < 0) sel_ = 0;
+
+    // THE POINTER: hover selects the row under the ray; the trigger's edge clicks it (THE ROW KINDS)
+    if (dropdown_ >= (int)visible_.size() || (dropdown_ >= 0 && visible_[dropdown_]->choices.empty())) dropdown_ = -1;
+    {
+        bool click = false;
+        point(in, click);
+        if (pointing_ < 0) dropdown_ = -1;  // the controller went (a pad or key took over): no list left hanging
+        bool acted = false, hold = false;
+        if (pointing_ >= 0 && dropdown_ >= 0) {
+            if (click) {
+                Item &d = *visible_[dropdown_];
+                if (drop_hover_ >= 0 && drop_hover_ < (int)d.choices.size() && d.pick) d.pick(drop_hover_);
+                dropdown_ = -1;
+                acted = true;
+            }
+        } else if (pointing_ >= 0 && hover_row_ >= 0 && hover_row_ < (int)visible_.size()) {
+            Item &it = *visible_[hover_row_];
+            sel_ = hover_row_;
+            const bool half = hover_zone_ == kDec || hover_zone_ == kInc;
+            if (it.kind == Kind::Stepper) {
+                bool step = false;
+                if (click && half) {
+                    step = true;
+                    ptr_hold_ = true;
+                    ptr_repeat_at_ = now_ + 0.35;
+                } else if (click && hover_zone_ == kReset && it.reset) {
+                    it.reset();
+                    acted = true;
+                } else if (!click && half && ptr_hold_ && trigger_was_[pointing_] && now_ >= ptr_repeat_at_) {
+                    step = true;
+                    hold = true;
+                    ptr_repeat_at_ = now_ + 0.12;
+                }
+                if (step && it.change) {
+                    it.change(hover_zone_ == kInc ? +1 : -1);
+                    acted = true;
+                }
+            } else if (click) {
+                acted = true;
+                if (it.kind == Kind::Choice) {
+                    dropdown_ = hover_row_;
+                } else if (it.kind == Kind::Confirm) {
+                    if (hover_zone_ == kConfirm && armed(it)) run_confirm(it);
+                    else if (it.change) it.change(+1);
+                } else {
+                    select = true;          // a toggle, action, page, Return, or an old-style row: A's path
+                }
+            }
+        }
+        if (pointing_ < 0 || !trigger_was_[pointing_]) ptr_hold_ = false;
+        if (acted) haptic(pointing_, hold ? 0.3f : 0.6f, hold ? 0.02f : 0.05f);
+    }
+    if (!open_) return;                     // a Confirm's button closed the menu
+    {
+        // a Confirm row left puts it back to No; its button's focus goes with the Yes
+        disarm(page_, visible_[sel_]);
+        if (!armed(*visible_[sel_])) button_focus_ = false;
+    }
 
     // one direction from any source, with key repeat
     float sx = 0, sy = 0;
@@ -329,21 +569,34 @@ void Menu::update(const Tick &t, const Input &in)
     else if (fire) repeat_at_ = now_ + 0.12;
     last_dir_ = dir;
     int n = (int)visible_.size();
+    // the d-pad, the keys and A never touch a dropdown: it closes, and the press goes on as it always did
+    if (dropdown_ >= 0 && (fire || select)) dropdown_ = -1;
     if (fire) {
         Item &it = *visible_[sel_];
+        const bool conf = it.kind == Kind::Confirm;
         if (dir == 1) sel_ = (sel_ + n - 1) % n;
         if (dir == 2) sel_ = (sel_ + 1) % n;
         if (dir == 3 && it.sub) enter(it);
+        else if (dir == 3 && conf && armed(it)) button_focus_ = true;
         else if (dir == 3 && it.value && it.change) it.change(+1);
-        if (dir == 4 && it.value && it.change) it.change(-1);
+        if (dir == 4 && conf && button_focus_) button_focus_ = false;
+        else if (dir == 4 && it.value && it.change) it.change(-1);
     }
     if (open_ && select) {
         Item &it = *visible_[std::min(sel_, n - 1)];
-        if (it.sub) enter(it);
-        else if (it.press) it.press();
-        else if (it.change) it.change(+1);
+        if (it.kind == Kind::Confirm) {
+            if (button_focus_) run_confirm(it);
+            else if (armed(it)) button_focus_ = true;
+        } else if (it.sub) {
+            enter(it);
+        } else if (it.press) {
+            it.press();
+        } else if (it.change) {
+            it.change(+1);
+        }
     } else if (open_ && back_pressed) {
-        back();
+        if (dropdown_ >= 0) dropdown_ = -1;     // B leaves the dropdown, not the page
+        else back();
     }
     // a row's change may have hidden rows or changed page: the list again for the draw
     if (open_) {
@@ -351,16 +604,87 @@ void Menu::update(const Tick &t, const Input &in)
         for (Item &it : *page_)
             if (!it.shown || it.shown()) visible_.push_back(&it);
         if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
+        if (sel_ >= 0 && !visible_.empty()) {
+            disarm(page_, visible_[sel_]);
+            if (!armed(*visible_[sel_])) button_focus_ = false;
+        }
     }
 }
 
 // ---- the picture ----
 
-float Menu::line_width(const Line &l) const
+// Where each seg of the line starts from its left edge (`xs`, if given) and the line's width.
+float Menu::layout(const Line &l, std::vector<float> *xs) const
 {
-    float w = 0;
-    for (const Line::Seg &s : l.segs) w = std::max(w, s.x) + l.font->CalcTextSizeA(l.size, 1e9f, 0, s.text.c_str()).x;
-    return w;
+    float x = 0;
+    if (xs) xs->clear();
+    for (const Line::Seg &s : l.segs) {
+        x = std::max(x, s.x) + s.lead;
+        if (xs) xs->push_back(x);
+        x += s.w >= 0 ? s.w : l.font->CalcTextSizeA(l.size, 1e9f, 0, s.text.c_str()).x;
+    }
+    return x;
+}
+
+// One row's segs by its kind (THE ROW KINDS). `worst`: for SIZES, the widest it can be: a reserved value with its
+// reserve, a choice's longest label, a Confirm with its button.
+void Menu::item_segs(const Item &it, bool selected, float column, bool worst, Line &l) const
+{
+    using Seg = Line::Seg;
+    const float sw = font_->CalcTextSizeA(kFontPx, 1e9f, 0, " ").x;
+    const ImU32 c = selected ? kSelected : kText;
+    const std::string head = (selected ? "> " : "  ") + it.label;      // the same width: the labels stay put
+    auto glyph = [&](int g, int zone, float lead, float x = -1) {
+        Seg q{"", c, false, x};
+        q.glyph = g;
+        q.zone = zone;
+        q.w = kGlyphW;
+        q.lead = lead;
+        l.segs.push_back(q);
+    };
+    auto button = [&](const std::string &text, int zone) {
+        Seg q{text, c, false};
+        q.button = true;
+        q.zone = zone;
+        q.lead = sw;
+        q.w = font_->CalcTextSizeA(kFontPx, 1e9f, 0, text.c_str()).x + 2 * kBtnPad;
+        l.segs.push_back(q);
+    };
+    if (!it.value) {
+        if (it.kind == Kind::Page) {
+            l.segs.push_back({head, c, false});
+            glyph(2, 0, 2 * sw);
+        } else {
+            l.segs.push_back({it.sub ? head + "  >" : head, c, false});
+        }
+        return;
+    }
+    l.segs.push_back({head + ":", c, false});
+    std::string v = it.value();
+    if (worst && it.kind == Kind::Choice) {
+        float best = 0;
+        for (const std::string &s : it.choices) {
+            float w = font_->CalcTextSizeA(kFontPx, 1e9f, 0, s.c_str()).x;
+            if (w > best) {
+                best = w;
+                v = s;
+            }
+        }
+    } else if (worst && it.reserve) {
+        v += hooks_.value_reserve;
+    }
+    if (it.kind == Kind::Stepper) glyph(1, kDec, 0, column - kGlyphW - 0.3f * sw);
+    Seg val{v, selected ? kSelected : kWhite, true, column};
+    val.zone = kValue;
+    l.segs.push_back(val);
+    if (it.kind == Kind::Stepper) {
+        glyph(2, kInc, 0.3f * sw);
+        if (it.reset) button("Reset", kReset);
+    } else if (it.kind == Kind::Choice) {
+        glyph(3, 0, 0.4f * sw);
+    } else if (it.kind == Kind::Confirm && (worst || armed(it))) {
+        button("Confirm " + it.label, kConfirm);
+    }
 }
 
 // the title, the rows (the selected one yellow, "> "; a value bold and white, every value in one
@@ -380,19 +704,13 @@ void Menu::build_lines(std::vector<Line> &out, bool &has_help)
     for (int i = 0; i < (int)visible_.size(); ++i) {
         const Item &it = *visible_[i];
         if (it.gap && i > 0) line(font_, kFontPx, kPitch);
-        bool s = i == sel_;
         Line &l = line(font_, kFontPx, kPitch);
-        ImU32 c = s ? kSelected : kText;
-        std::string head = (s ? "> " : "  ") + it.label;      // the same width: the labels stay put
-        if (it.value) {
-            l.segs.push_back({head + ":", c, false});
-            l.segs.push_back({it.value(), s ? kSelected : kWhite, true, column});
-        } else {
-            l.segs.push_back({it.sub ? head + "  >" : head, c, false});
-        }
+        l.row = i;
+        item_segs(it, i == sel_, column, false, l);
     }
     line(font_, kFontPx, kPitch);
-    for (const char *c : kControlsLine) line(font_, kFontPx, kPitch).segs.push_back({c, kText, false});
+    for (const char *c : pointer_hint_ ? kPointerLine : kControlsLine)
+        line(font_, kFontPx, kPitch).segs.push_back({c, kText, false});
 
     // HELP: wrapped to the page's widest line; blank lines to the page's longest help
     has_help = false;
@@ -463,6 +781,7 @@ float Menu::widest() const
     auto text_w = [&](const std::string &t) { return font_->CalcTextSizeA(kFontPx, 1e9f, 0, t.c_str()).x; };
     float w = 0;
     for (const char *c : kControlsLine) w = std::max(w, text_w(c));
+    for (const char *c : kPointerLine) w = std::max(w, text_w(c));
     std::vector<std::pair<const Page *, std::string>> todo = {{top_, top_title_}};
     std::vector<const Page *> seen;
     while (!todo.empty()) {
@@ -473,8 +792,10 @@ float Menu::widest() const
         w = std::max(w, text_w(title));
         float column = value_column(*p);
         for (const Item &it : *p) {
-            if (it.value) w = std::max(w, column + text_w(it.reserve ? it.value() + hooks_.value_reserve : it.value()));
-            else w = std::max(w, text_w("  " + it.label + (it.sub ? "  >" : "")));
+            Line l;
+            l.font = font_;
+            item_segs(it, false, column, true, l);
+            w = std::max(w, layout(l));
             if (it.sub) {
                 std::string up = it.label;
                 std::transform(up.begin(), up.end(), up.begin(), [](unsigned char c) { return (char)std::toupper(c); });
@@ -491,14 +812,18 @@ float Menu::tallest(const Page &p) const
     float lines = 2 + 1 + 2;                // title and a blank; a blank and the controls lines
     bool help = false;
     size_t rows = 0;
+    float drop = 0;                         // the lowest a dropdown reaches, in lines: THE ROW KINDS
+    float at = 2;                           // lines above the row
     for (size_t i = 0; i < p.size(); ++i) {
         lines += 1 + (p[i].gap && i > 0 ? 1 : 0);
+        at += 1 + (p[i].gap && i > 0 ? 1 : 0);
+        if (!p[i].choices.empty()) drop = std::max(drop, at + (float)p[i].choices.size());
         if (p[i].help) {
             help = true;
             rows = std::max(rows, wrap_help(p[i].help, menu_w_).size());
         }
     }
-    return lines * kPitch + (help ? (1 + rows) * kPitch * 0.75f : 0.f);
+    return std::max(lines * kPitch + (help ? (1 + rows) * kPitch * 0.75f : 0.f), drop * kPitch);
 }
 
 void Menu::build_message(std::vector<Line> &out)
@@ -527,21 +852,130 @@ void Menu::draw_panel(ImDrawList *dl, float ox, float oy, const std::vector<Line
 {
     dl->AddRectFilled(ImVec2(ox, oy), ImVec2(ox + w, oy + h), kBack);
     float y = oy + kMargin;
+    std::vector<float> xs;
     for (const Line &l : lines) {
-        float x = ox + kMargin;
-        for (const Line::Seg &s : l.segs) {
-            if (s.x >= 0) x = std::max(x, ox + kMargin + s.x);
+        const bool hovered = l.row >= 0 && l.row == hover_row_ && hit_id_ == 0;
+        if (hovered) dl->AddRectFilled(ImVec2(ox + kMargin * 0.4f, y), ImVec2(ox + w - kMargin * 0.4f, y + l.pitch), kGlow);
+        layout(l, &xs);
+        for (size_t i = 0; i < l.segs.size(); ++i) {
+            const Line::Seg &s = l.segs[i];
+            const float x = ox + kMargin + xs[i];
+            const bool lit = hovered && s.zone && s.zone == hover_zone_;
+            if (s.glyph) {
+                // a shape: `<` `>` as a chevron, `v` as a triangle, in the row's colour (white under the ray)
+                const float cx = x + s.w / 2, cy = y + l.size * 0.5f, hh = l.size * 0.25f, hw = s.w * 0.25f;
+                const ImU32 col = lit ? kWhite : s.col;
+                if (s.glyph == 3) {
+                    dl->AddTriangleFilled(ImVec2(cx - s.w / 2, cy - hh * 0.5f), ImVec2(cx + s.w / 2, cy - hh * 0.5f),
+                                          ImVec2(cx, cy + hh), col);
+                } else {
+                    const float d = s.glyph == 1 ? -1.f : 1.f;
+                    const ImVec2 pts[3] = {ImVec2(cx - d * hw, cy - hh), ImVec2(cx + d * hw, cy), ImVec2(cx - d * hw, cy + hh)};
+                    dl->AddPolyline(pts, 3, col, 0, lit ? 4.f : 3.f);
+                }
+                continue;
+            }
             const char *b = s.text.c_str();
-            dl->AddText(l.font, l.size, ImVec2(x, y), s.col, b);
-            if (s.bold) dl->AddText(l.font, l.size, ImVec2(x + 1.5f, y), s.col, b);     // ProggyForever has no bold
-            x += l.font->CalcTextSizeA(l.size, 1e9f, 0, b).x;
+            float tx = x;
+            ImU32 col = s.col;
+            if (s.button) {
+                const bool focus = s.zone == kConfirm && button_focus_ && l.row == sel_;
+                dl->AddRectFilled(ImVec2(x, y + 1), ImVec2(x + s.w, y + l.pitch - 3), focus ? kSelected : lit ? kBtnHot : kBtn,
+                                  kBtnPad * 0.5f);
+                tx = x + kBtnPad;
+                col = focus ? kBack : kWhite;
+            }
+            dl->AddText(l.font, l.size, ImVec2(tx, y), col, b);
+            if (s.bold) dl->AddText(l.font, l.size, ImVec2(tx + 1.5f, y), col, b);     // ProggyForever has no bold
         }
         y += l.pitch;
+    }
+    // THE ROW KINDS: the open dropdown, over what lies under it; the current choice marked, the one under the ray lit
+    if (dropdown_ >= 0 && dropdown_ < (int)visible_.size() && drop_x1_ > drop_x0_) {
+        const Item &it = *visible_[dropdown_];
+        const int cur = it.index ? it.index() : -1;
+        dl->AddRectFilled(ImVec2(ox + drop_x0_, oy + drop_y0_), ImVec2(ox + drop_x1_, oy + drop_y1_), kDropBack, kBtnPad * 0.5f);
+        dl->AddRect(ImVec2(ox + drop_x0_, oy + drop_y0_), ImVec2(ox + drop_x1_, oy + drop_y1_), kText, kBtnPad * 0.5f, 0, 2.f);
+        for (size_t i = 0; i < it.choices.size(); ++i) {
+            const float ty = oy + drop_y0_ + (float)i * kPitch;
+            if ((int)i == drop_hover_)
+                dl->AddRectFilled(ImVec2(ox + drop_x0_ + 3, ty + 1), ImVec2(ox + drop_x1_ - 3, ty + kPitch - 1), kBtnHot);
+            const ImU32 col = (int)i == cur ? kSelected : kWhite;
+            dl->AddText(font_, kFontPx, ImVec2(ox + drop_x0_ + kBtnPad, ty + (kPitch - kFontPx) * 0.5f), col,
+                        it.choices[i].c_str());
+            if ((int)i == cur)
+                dl->AddCircleFilled(ImVec2(ox + drop_x1_ - kBtnPad * 0.6f, ty + kPitch * 0.5f), kDotPx * 0.6f, kSelected, 12);
+        }
     }
     if (!hooks_.version.empty() && !showing_message_) {
         std::string v = "v" + hooks_.version;
         float vw = small_font_->CalcTextSizeA(kSmallPx, 1e9f, 0, v.c_str()).x;
         dl->AddText(small_font_, kSmallPx, ImVec2(ox + w - kMargin * 0.2f - vw, oy + kMargin * 0.2f), kHelp, v.c_str());
+    }
+}
+
+// The pointing hand's ray against the quads prepare hung (the nearest one in front of it), into that layer's
+// pixels; the panel's row under it; a light tick when the row changes. `click`: the trigger went down.
+void Menu::point(const Input &in, bool &click)
+{
+    pointer_hint_ = in.controller_shown(Input::kLeft) || in.controller_shown(Input::kRight);
+    pointing_ = in.controller_shown(Input::kRight) && in.hands[Input::kRight].aim_tracked ? Input::kRight
+              : in.controller_shown(Input::kLeft) && in.hands[Input::kLeft].aim_tracked ? Input::kLeft : -1;
+    int was = hover_row_;
+    hit_id_ = hover_row_ = -1;
+    hit_t_ = 0;
+    click = false;
+    if (pointing_ < 0) return;
+    const Pose &a = in.hands[pointing_].aim;
+    float d[3], best = 1e9f;
+    rotate(a.rot, 0, 0, -1, d);
+    for (const Quad &q : quads_) {
+        // the quad's right (cos, 0, -sin) and normal (sin, 0, cos), as panel_point turns them
+        float c = std::cos(q.yaw), s = std::sin(q.yaw);
+        float den = s * d[0] + c * d[2];
+        if (den >= -1e-4f) continue;                // edge-on, or the ray comes from behind it
+        float ox = q.c[0] - a.pos[0], oz = q.c[2] - a.pos[2];
+        float t = (s * ox + c * oz) / den;
+        if (t <= 0 || t >= best) continue;
+        float px = a.pos[0] + d[0] * t - q.c[0], py = a.pos[1] + d[1] * t - q.c[1], pz = a.pos[2] + d[2] * t - q.c[2];
+        float u = c * px - s * pz, v = py;
+        if (std::fabs(u) > q.w / 2 || std::fabs(v) > q.h / 2) continue;
+        best = t;
+        hit_id_ = q.id;
+        hit_t_ = t;
+        hit_x_ = (u + q.w / 2) * kPxPerM;
+        hit_y_ = (q.h / 2 - v) * kPxPerM;
+    }
+    if (hit_id_ == 0) {
+        for (size_t i = 0; i < rows_.size() && i < visible_.size(); ++i)
+            if (hit_y_ >= rows_[i].y && hit_y_ < rows_[i].y + rows_[i].h) hover_row_ = (int)i;
+    }
+    click = trigger_pressed_[pointing_];
+    // an open dropdown takes the ray: the rows under it are not hovered, and the selection stays
+    const int was_drop = drop_hover_;
+    drop_hover_ = -1;
+    if (dropdown_ >= 0 && dropdown_ < (int)visible_.size()) {
+        if (hit_id_ == 0 && hit_x_ >= drop_x0_ && hit_x_ < drop_x1_ && hit_y_ >= drop_y0_ && hit_y_ < drop_y1_)
+            drop_hover_ = (int)((hit_y_ - drop_y0_) / kPitch);
+        hover_row_ = -1;
+        hover_zone_ = kNoZone;
+        if (drop_hover_ >= 0 && drop_hover_ != was_drop) haptic(pointing_, 0.15f, 0.02f);
+        return;
+    }
+    // the part of the row under the ray: a stepper's halves, its Reset, a Confirm's button
+    hover_zone_ = kNoZone;
+    if (hover_row_ >= 0 && hover_row_ < (int)rows_.size()) {
+        const RowRect &r = rows_[hover_row_];
+        const Item &it = *visible_[hover_row_];
+        const float sw = font_->CalcTextSizeA(kFontPx, 1e9f, 0, " ").x;
+        if (it.kind == Kind::Stepper && r.dec0 >= 0 && hit_x_ >= r.dec0 - sw && hit_x_ < r.inc1 + sw)
+            hover_zone_ = hit_x_ < (r.dec0 + r.inc1) / 2 ? kDec : kInc;
+        if (it.kind == Kind::Stepper && r.reset0 >= 0 && hit_x_ >= r.reset0 && hit_x_ < r.reset1) hover_zone_ = kReset;
+        if (it.kind == Kind::Confirm && r.conf0 >= 0 && hit_x_ >= r.conf0 && hit_x_ < r.conf1) hover_zone_ = kConfirm;
+    }
+    if (hover_row_ >= 0 && hover_row_ != was) {
+        sel_ = hover_row_;
+        haptic(pointing_, 0.15f, 0.02f);
     }
 }
 
@@ -554,6 +988,8 @@ void Menu::prepare(gpu::Frame &f)
     };
     bool noting = !note_text_.empty() && ctx_ && render_ && note_.layer;
     if (!up) {
+        quads_.clear();
+        hit_id_ = hover_row_ = -1;
         hide(panel_);
         hide(legend_);
         for (Drawn &d : box_layers_) hide(d);
@@ -596,15 +1032,60 @@ void Menu::prepare(gpu::Frame &f)
         else build_lines(lines, has_help);
         float tw = 0, th = 0;
         for (const Line &l : lines) {
-            tw = std::max(tw, line_width(l));
+            tw = std::max(tw, layout(l));
             th += l.pitch;
         }
         if (!showing_message_) tw = menu_w_ = std::max(menu_w_, tw);
         page_w_ = std::max(page_w_, tw);
         page_h_ = std::max(page_h_, th);
         uint32_t pw = (uint32_t)std::ceil(page_w_ + 2 * kMargin), ph = (uint32_t)std::ceil(page_h_ + 2 * kMargin);
+        rows_.clear();
+        float ly = kMargin;
+        std::vector<float> xs;
+        for (const Line &l : lines) {
+            if (l.row >= 0) {
+                RowRect r{ly, l.pitch};
+                layout(l, &xs);
+                for (size_t i = 0; i < l.segs.size(); ++i) {
+                    const Line::Seg &s = l.segs[i];
+                    const float x0 = kMargin + xs[i], x1 = x0 + (s.w >= 0 ? s.w : l.font->CalcTextSizeA(l.size, 1e9f, 0, s.text.c_str()).x);
+                    if (s.zone == kDec) r.dec0 = x0;
+                    if (s.zone == kInc) r.inc1 = x1;
+                    if (s.zone == kReset) {
+                        r.reset0 = x0;
+                        r.reset1 = x1;
+                    }
+                    if (s.zone == kConfirm) {
+                        r.conf0 = x0;
+                        r.conf1 = x1;
+                    }
+                    if (s.zone == kValue) r.val0 = x0;
+                }
+                rows_.push_back(r);
+            }
+            ly += l.pitch;
+        }
+        // the open dropdown hangs under its value (THE ROW KINDS), as wide as its longest choice
+        drop_x1_ = drop_x0_ = 0;
+        if (dropdown_ >= 0 && dropdown_ < (int)rows_.size() && dropdown_ < (int)visible_.size() &&
+            !visible_[dropdown_]->choices.empty()) {
+            const Item &it = *visible_[dropdown_];
+            float dw = 0;
+            for (const std::string &c : it.choices) dw = std::max(dw, font_->CalcTextSizeA(kFontPx, 1e9f, 0, c.c_str()).x);
+            drop_x0_ = rows_[dropdown_].val0 - kBtnPad;
+            drop_x1_ = drop_x0_ + dw + 3 * kBtnPad;
+            drop_y0_ = rows_[dropdown_].y + rows_[dropdown_].h;
+            drop_y1_ = drop_y0_ + (float)it.choices.size() * kPitch;
+        }
+        quads_.clear();
+        auto cursor = [&](ImDrawList *l, const Drawn &d, int id) {
+            if (hit_id_ != id) return;
+            ImVec2 c(d.x + hit_x_, hit_y_);
+            l->AddCircleFilled(c, kDotPx, hover_row_ >= 0 ? kSelected : kDot, 16);
+        };
         ImDrawList *dl = begin(panel_, "##panel", pw, ph);
         draw_panel(dl, panel_.x, 0, lines, (float)panel_.w, (float)panel_.h);
+        cursor(dl, panel_, 0);
         ImGui::End();
 
         // the CONTROLS box: two columns, the buttons white
@@ -628,6 +1109,7 @@ void Menu::prepare(gpu::Frame &f)
                 dl->AddText(font_, kFontPx, ImVec2(ox + kMargin + kw + kLegendGap, y), kText, r.second.c_str());
                 y += kPitch;
             }
+            cursor(dl, legend_, 1);
             ImGui::End();
         }
 
@@ -642,6 +1124,7 @@ void Menu::prepare(gpu::Frame &f)
             dl = begin(d, name, (uint32_t)std::ceil(wm * kPxPerM + 2 * kMargin), (uint32_t)std::ceil(hm * kPxPerM + 2 * kMargin));
             dl->AddRectFilled(ImVec2(d.x, 0), ImVec2(d.x + d.w, (float)d.h), kBack);
             if (boxes_[i].draw) boxes_[i].draw(dl, d.x + kMargin, kMargin, kPxPerM);
+            cursor(dl, d, 2 + (int)i);
             ImGui::End();
         }
     }
@@ -678,10 +1161,26 @@ void Menu::prepare(gpu::Frame &f)
     }
     note_text_.clear();                     // given again every frame it shows
     if (!up) return;
+    // the controllers and the ray on the overlay, in front of the quads. The ray ends where it lands, or runs
+    // kRayMiss; yellow over a row, a dropdown's choice or a Confirm button, as the cursor dot is.
+    if (models_.ready()) {
+        ControllerModels::Draw draws[2] = {ctl_[0], ctl_[1]};
+        bool any = false;
+        for (ControllerModels::Draw &c : draws) {
+            c.ray_length = hit_id_ >= 0 && hit_t_ > 0 ? hit_t_ : ControllerModels::kRayMiss;
+            c.clickable = hover_row_ >= 0 || drop_hover_ >= 0;
+            any |= c.shown;
+        }
+        if (any) overlay_draw([this, draws](gpu::Frame &fr) { models_.draw(fr, draws); });
+    }
     Quat rot = yaw_quat(yaw_);
     float panel_w = panel_.w / kPxPerM;
-    if (paint(panel_)) layer_place(panel_.layer, pos_, rot, panel_w, panel_.h / kPxPerM, true);
-    else hide(panel_);
+    if (paint(panel_)) {
+        layer_place(panel_.layer, pos_, rot, panel_w, panel_.h / kPxPerM, true);
+        quads_.push_back({{pos_[0], pos_[1], pos_[2]}, yaw_, panel_w, panel_.h / kPxPerM, 0});
+    } else {
+        hide(panel_);
+    }
     // Each side's row starts kHinge off the panel's edge and curves round you: every stretch along it (a box, or a
     // box's gap) turns kTurn more than the last, the far edge coming towards you, so the first box stands at kTurn
     // and the row keeps its distance (Box). Per side: the row's end in the panel's frame (out from the edge, towards
@@ -699,7 +1198,7 @@ void Menu::prepare(gpu::Frame &f)
         r.out += c * len;
         r.in += s * len;
     };
-    auto hinge = [&](Drawn &d) {
+    auto hinge = [&](Drawn &d, int id) {
         if (!paint(d)) {
             hide(d);
             return;
@@ -707,11 +1206,12 @@ void Menu::prepare(gpu::Frame &f)
         float bw = d.w / kPxPerM, c[3], yaw;
         stretch(d.left, bw, c, yaw);
         layer_place(d.layer, c, yaw_quat(yaw), bw, d.h / kPxPerM, true);
+        quads_.push_back({{c[0], c[1], c[2]}, yaw, bw, d.h / kPxPerM, id});
         Row &r = row[d.left ? 0 : 1];
         r.out += std::cos(r.turn) * kHinge;     // the next one kHinge on
         r.in += std::sin(r.turn) * kHinge;
     };
-    if (legend_.w) hinge(legend_);
+    if (legend_.w) hinge(legend_, 1);
     else hide(legend_);
     for (size_t i = 0; i < box_layers_.size(); ++i) {
         Drawn &d = box_layers_[i];
@@ -726,7 +1226,7 @@ void Menu::prepare(gpu::Frame &f)
             panel_point(pos_, yaw_, (b.left ? -1.f : 1.f) * r.out, 0, r.in, mid);
             b.placed(mid, yaw_ + (b.left ? r.turn : -r.turn), pos_, yaw_);
         }
-        if (d.w) hinge(d);
+        if (d.w) hinge(d, 2 + (int)i);
         else hide(d);
     }
 }

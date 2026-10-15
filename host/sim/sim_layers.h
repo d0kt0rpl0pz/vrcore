@@ -9,7 +9,7 @@
 namespace vrcore::sim {
 
 bool layers_init(gpu::Renderer &r);         // after the renderer, before the front's init
-void layers_draw(gpu::Frame &f);            // in the eye pass, after the front's draw
+void layers_draw(gpu::Frame &f);            // in the eye pass, after the front's draw (then the overlay)
 void layers_shutdown(gpu::Renderer &r);     // after the front's shutdown
 
 }

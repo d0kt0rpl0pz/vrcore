@@ -2,13 +2,14 @@
  * render_host.h -- the host's side of render.h: the renderer's Vulkan state and the frame sequence.
  * Two frames in flight; each slot has a command buffer, a fence, the Views and front uniform buffers and
  * their descriptor sets, a descriptor pool for the frame's texture sets, a staging buffer for its uploads, and
- * two timestamps (the frame's GPU time, read back when the slot comes round).
+ * two timestamps (the frame's GPU time, every pass up to the submit, read back when the slot comes round).
  *
  *   Frame &f = renderer_begin(r, eyes);                 // waits for the slot, opens its command buffer
  *   front.prepare(f);                                   // uploads, dynamic buffers, offscreen passes
  *   renderer_begin_eye_pass(r, image, clear);           // the multiview eye pass on `image`
  *   front.draw(f);
  *   renderer_end_pass(r);
+ *   [renderer_begin_eye_pass(r, image, clear, &overlay) ... renderer_end_pass(r)]    // the headset's overlay
  *   ... host commands on renderer_cmd(r) (the sim's blit) ...
  *   renderer_submit(r, wait, wait_stage, signal);
  *
@@ -111,6 +112,7 @@ struct RendererImpl {
     VkQueryPool queries = VK_NULL_HANDLE;    // 2 per slot; null when the queue has no timestamps
     double gpu_ms = 0;                       // the last read-back frame
     enum class InPass { None, Offscreen, Eye } in_pass = InPass::None;
+    EyeTarget *eye_on = nullptr;             // the eye pass's target (the renderer's, or another's)
 
     Renderer renderer;                       // what the front sees
     Frame frame;
@@ -127,6 +129,9 @@ Frame &renderer_begin(RendererImpl &r, const Eye eyes[2]);
 // eye pipeline fits); null: the renderer's.
 void renderer_begin_eye_pass(RendererImpl &r, uint32_t image, const float clear_rgba[4], EyeTarget *on = nullptr);
 void renderer_end_pass(RendererImpl &r);
+// In the eye pass: its depth (and stencil) cleared as the pass began, so what is drawn next stands over all that
+// was drawn before (the sim's overlay: app/layers.h).
+void renderer_clear_depth(RendererImpl &r);
 VkCommandBuffer renderer_cmd(const RendererImpl &r);
 bool renderer_submit(RendererImpl &r, VkSemaphore wait = VK_NULL_HANDLE, VkPipelineStageFlags wait_stage = 0,
                      VkSemaphore signal = VK_NULL_HANDLE);

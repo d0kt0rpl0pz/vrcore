@@ -9,9 +9,10 @@
  * registry, 1.1.63, so Index's are suggested and a refusal is only logged). One profile refusing its bindings
  * does not stop the rest. The profile in force is logged when the runtime says it changed.
  *
- * EACH FRAME (after xrWaitFrame, before the front's update): xrSyncActions, the grip poses and the head located
- * in LOCAL at the predicted display time (the time the eyes are drawn for). Unfocused, every hand reads
- * inactive and zero. The grip "pressed" (`squeezed`) is the Input System's: on at 0.5, off under 0.375.
+ * EACH FRAME (after xrWaitFrame, before the front's update): xrSyncActions, the grip and aim poses and the head
+ * located in LOCAL at the predicted display time (the time the eyes are drawn for). Unfocused, every hand reads
+ * inactive and zero. The aim pose is the one a ray is cast from (the menu's pointer); every suggested profile
+ * has /input/aim/pose. The grip "pressed" (`squeezed`) is the Input System's: on at 0.5, off under 0.375.
  * `tracked`: position and orientation both TRACKED (not only valid: a controller out of the cameras' sight
  * keeps an estimated pose for a while, which the wheel must treat as lost).
  */
@@ -28,11 +29,12 @@ namespace vrcore::xr {
 
 struct Actions {
     XrActionSet set = XR_NULL_HANDLE;
-    XrAction grip = XR_NULL_HANDLE, trigger = XR_NULL_HANDLE, squeeze = XR_NULL_HANDLE, stick = XR_NULL_HANDLE,
+    XrAction grip = XR_NULL_HANDLE, aim = XR_NULL_HANDLE, trigger = XR_NULL_HANDLE, squeeze = XR_NULL_HANDLE, stick = XR_NULL_HANDLE,
              stick_click = XR_NULL_HANDLE, primary = XR_NULL_HANDLE, secondary = XR_NULL_HANDLE,
              menu = XR_NULL_HANDLE, haptic = XR_NULL_HANDLE;
     XrPath hand[2] = {XR_NULL_PATH, XR_NULL_PATH};
     XrSpace grip_space[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+    XrSpace aim_space[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
     XrSpace view = XR_NULL_HANDLE;              // the head
 };
 
@@ -162,6 +164,7 @@ bool actions_create(Host &h)
     SDL_strlcpy(si.localizedActionSetName, "Gameplay", XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE);
     VRCORE_XR(xrCreateActionSet(h.instance, &si, &a.set), false);
     if (!make_action(a, a.grip, XR_ACTION_TYPE_POSE_INPUT, "grip", "Grip pose") ||
+        !make_action(a, a.aim, XR_ACTION_TYPE_POSE_INPUT, "aim", "Aim pose") ||
         !make_action(a, a.trigger, XR_ACTION_TYPE_FLOAT_INPUT, "trigger", "Trigger") ||
         !make_action(a, a.squeeze, XR_ACTION_TYPE_FLOAT_INPUT, "squeeze", "Grip") ||
         !make_action(a, a.stick, XR_ACTION_TYPE_VECTOR2F_INPUT, "thumbstick", "Thumbstick") ||
@@ -175,6 +178,7 @@ bool actions_create(Host &h)
     // Touch, Touch Plus: the same components (the right menu button is the system's)
     static const Bind kTouch[] = {
         {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},
+        {&Actions::aim, "/input/aim/pose", "/input/aim/pose"},
         {&Actions::trigger, "/input/trigger/value", "/input/trigger/value"},
         {&Actions::squeeze, "/input/squeeze/value", "/input/squeeze/value"},
         {&Actions::stick, "/input/thumbstick", "/input/thumbstick"},
@@ -186,6 +190,7 @@ bool actions_create(Host &h)
     };
     static const Bind kSimple[] = {
         {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},
+        {&Actions::aim, "/input/aim/pose", "/input/aim/pose"},
         {&Actions::trigger, "/input/select/click", "/input/select/click"},
         {&Actions::menu, "/input/menu/click", nullptr},
         {&Actions::haptic, "/output/haptic", "/output/haptic"},
@@ -193,6 +198,7 @@ bool actions_create(Host &h)
     // Index (and the Frame's controller, until its own paths are in the registry): no menu button
     static const Bind kIndex[] = {
         {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},
+        {&Actions::aim, "/input/aim/pose", "/input/aim/pose"},
         {&Actions::trigger, "/input/trigger/value", "/input/trigger/value"},
         {&Actions::squeeze, "/input/squeeze/value", "/input/squeeze/value"},
         {&Actions::stick, "/input/thumbstick", "/input/thumbstick"},
@@ -211,7 +217,7 @@ bool actions_create(Host &h)
     return true;
 }
 
-// After the session: the action set attached, the grip and head spaces.
+// After the session: the action set attached, the grip and aim spaces and the head's.
 bool actions_attach(Host &h)
 {
     Actions &a = *h.actions;
@@ -225,6 +231,8 @@ bool actions_attach(Host &h)
         ci.subactionPath = a.hand[i];
         ci.poseInActionSpace.orientation.w = 1.f;
         VRCORE_XR(xrCreateActionSpace(h.session, &ci, &a.grip_space[i]), false);
+        ci.action = a.aim;
+        VRCORE_XR(xrCreateActionSpace(h.session, &ci, &a.aim_space[i]), false);
     }
     XrReferenceSpaceCreateInfo vi = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
     vi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
@@ -289,6 +297,15 @@ void actions_sync(Host &h, XrTime t)
                 hd.tracked = (l.locationFlags & kTracked) == kTracked;
             }
         }
+        gi.action = a->aim;
+        ps = {XR_TYPE_ACTION_STATE_POSE};
+        if (XR_SUCCEEDED(xrGetActionStatePose(h.session, &gi, &ps)) && ps.isActive) {
+            XrSpaceLocation l = {XR_TYPE_SPACE_LOCATION};
+            if (XR_SUCCEEDED(xrLocateSpace(a->aim_space[i], h.local, t, &l)) && (l.locationFlags & kValid) == kValid) {
+                to_pose(l.pose, hd.aim);
+                hd.aim_tracked = (l.locationFlags & kTracked) == kTracked;
+            }
+        }
         hd.active = active;
     }
 }
@@ -315,6 +332,8 @@ void actions_destroy(Host &h)
     input_set_haptics({});
     Actions &a = *h.actions;
     for (XrSpace s : a.grip_space)
+        if (s) xrDestroySpace(s);
+    for (XrSpace s : a.aim_space)
         if (s) xrDestroySpace(s);
     if (a.view) xrDestroySpace(a.view);
     if (a.set) xrDestroyActionSet(a.set);      // its actions with it

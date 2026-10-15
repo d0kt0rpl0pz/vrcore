@@ -3,15 +3,19 @@
  * offscreen target the front draws into, shown as a textured rectangle in the eye pass after the front's draw,
  * over everything (no depth test), in the order the layers were made: straight alpha blended, or opaque. An
  * underlay is drawn by layer_punch instead, where the front punches it: with the depth test, as the headset's
- * compositor shows it through the hole.
+ * compositor shows it through the hole. The overlay's draws come last, after the quads, on a cleared depth: over
+ * everything, as the headset composites its projection layer above the quads.
  */
 #include "sim_layers.h"
 
 #include <algorithm>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "../app/layers.h"
 #include "../app/log.h"
+#include "../gpu/render_host.h"
 
 namespace vrcore {
 
@@ -39,6 +43,7 @@ const uint32_t kLayerFrag[] = {
 };
 
 std::vector<Layer *> g_layers;
+std::vector<std::function<void(gpu::Frame &)>> g_overlay;     // this frame's overlay draws (overlay_draw)
 gpu::Pipeline *g_alpha = nullptr, *g_opaque = nullptr;
 gpu::Pipeline *g_under_alpha = nullptr, *g_under_opaque = nullptr;     // layer_punch's: depth tested and written
 
@@ -82,6 +87,10 @@ void layers_draw(gpu::Frame &f)
 {
     for (const Layer *l : g_layers)
         if (l->up && l->drawn && !l->desc.underlay) draw_layer(f, l, l->desc.opaque ? g_opaque : g_alpha);
+    if (g_overlay.empty()) return;
+    gpu::renderer_clear_depth(*f.impl);
+    for (const auto &draw : g_overlay) draw(f);
+    g_overlay.clear();
 }
 
 void layers_shutdown(gpu::Renderer &r)
@@ -145,6 +154,11 @@ void layer_punch(gpu::Frame &f, Layer *l)
 {
     if (!l || !l->desc.underlay || !l->up || !l->drawn) return;
     sim::draw_layer(f, l, l->desc.opaque ? sim::g_under_opaque : sim::g_under_alpha);
+}
+
+void overlay_draw(std::function<void(gpu::Frame &f)> draw)
+{
+    if (draw) sim::g_overlay.push_back(std::move(draw));
 }
 
 }

@@ -4,13 +4,21 @@
  * passes, released after the frame's submit, and submitted after the projection layer every frame it is up
  * (an underlay: before it, seen through layer_punch's hole). A frame that draws no new picture submits the last
  * released image (OpenXR allows it).
+ *
+ * And the overlay (app/layers.h): a second projection layer over the quads, on its own 2-layer swapchain of the
+ * eye swapchain's size, format and density maps, so its eye target's render pass matches the eye pass's and every
+ * eye pipeline draws on it. Made on the first frame that asks, kept until the eyes are made again; drawn and
+ * submitted only on frames that ask.
  */
 #include "xr_host.h"
 
 #include <algorithm>
+#include <functional>
+#include <utility>
 
 #include "../app/layers.h"
 #include "../app/log.h"
+#include "../gpu/render_host.h"
 #include "../gpu/vmath.h"
 
 namespace vrcore {
@@ -45,6 +53,66 @@ const uint32_t kPunchFrag[] = {
 gpu::Pipeline *g_punch = nullptr;           // made with the first underlay, gone with the last
 int g_underlays = 0;
 
+std::vector<std::function<void(gpu::Frame &)>> g_overlay;     // this frame's overlay draws (overlay_draw)
+
+// The overlay's swapchain and eye target; false (logged, h.overlay_failed): none until the eyes are made again.
+bool overlay_make(Host &h)
+{
+    if (h.overlay) return true;
+    if (h.overlay_failed) return false;
+    h.overlay_failed = true;                // until it is made
+    XrSwapchainCreateInfoFoveationFB fov = {XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+    fov.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+    XrSwapchainCreateInfo ci = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    ci.next = h.swapchain_fdm ? &fov : nullptr;
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    ci.format = h.format;
+    ci.sampleCount = 1;
+    ci.width = h.width;
+    ci.height = h.height;
+    ci.faceCount = 1;
+    ci.arraySize = 2;
+    ci.mipCount = 1;
+    VRCORE_XR(xrCreateSwapchain(h.session, &ci, &h.overlay), false);
+    uint32_t n = 0;
+    XrResult r = xrEnumerateSwapchainImages(h.overlay, 0, &n, nullptr);
+    if (XR_SUCCEEDED(r)) {
+        h.overlay_images.assign(n, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+        if (h.swapchain_fdm) {
+            h.overlay_fdm_images.assign(n, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+            for (uint32_t i = 0; i < n; ++i) h.overlay_images[i].next = &h.overlay_fdm_images[i];
+        }
+        r = xrEnumerateSwapchainImages(h.overlay, n, &n,
+                                       reinterpret_cast<XrSwapchainImageBaseHeader *>(h.overlay_images.data()));
+    }
+    gpu::EyeTargetDesc desc;
+    desc.width = h.width;
+    desc.height = h.height;
+    desc.color_format = h.format;
+    bool maps = true;
+    for (uint32_t i = 0; XR_SUCCEEDED(r) && i < n; ++i) {
+        desc.images.push_back(h.overlay_images[i].image);
+        if (!h.swapchain_fdm) continue;
+        maps = maps && h.overlay_fdm_images[i].image;
+        desc.fdm_images.push_back(h.overlay_fdm_images[i].image);
+    }
+    if (h.swapchain_fdm && maps && n) {
+        desc.fdm_width = h.overlay_fdm_images[0].width;
+        desc.fdm_height = h.overlay_fdm_images[0].height;
+    }
+    // without its density maps the pass would not match the eye pass's, and the eye pipelines could not draw on it
+    if (XR_FAILED(r) || !maps || !gpu::eye_target_create(h.dev, h.overlay_target, desc)) {
+        log("openxr: the overlay could not be made (%d%s); none", (int)r, maps ? "" : ", no density maps");
+        overlay_destroy(h);
+        h.overlay_failed = true;
+        return false;
+    }
+    h.overlay_failed = false;
+    if (h.swapchain_fdm && h.foveation >= 0) foveation_set(h, h.foveation);
+    log("xr: overlay %ux%u x2 layers, %u images%s", h.width, h.height, n, h.swapchain_fdm ? ", density maps" : "");
+    return true;
+}
+
 }
 
 void layers_bind(Host &h)
@@ -54,7 +122,14 @@ void layers_bind(Host &h)
 
 void layers_release(Host &h)
 {
-    (void)h;
+    if (h.overlay_acquired) {
+        XrResult r = xrReleaseSwapchainImage(h.overlay, nullptr);
+        if (XR_FAILED(r)) {
+            log("openxr: xrReleaseSwapchainImage (overlay): %d", (int)r);
+            h.overlay_drawn = false;
+        }
+        h.overlay_acquired = false;
+    }
     for (Layer *l : g_layers) {
         if (!l->acquired) continue;
         XrResult r = xrReleaseSwapchainImage(l->swapchain, nullptr);
@@ -86,6 +161,64 @@ void layers_compose(Host &h, std::vector<XrCompositionLayerQuad> &under, std::ve
         q.size = l->size;
         (l->desc.underlay ? under : over).push_back(q);
     }
+}
+
+void overlay_render(Host &h, gpu::Frame &f)
+{
+    h.overlay_drawn = false;
+    if (g_overlay.empty()) return;
+    std::vector<std::function<void(gpu::Frame &)>> draws;
+    draws.swap(g_overlay);                  // forgotten whatever happens
+    if (!overlay_make(h)) return;
+    uint32_t index = 0;
+    XrResult r = xrAcquireSwapchainImage(h.overlay, nullptr, &index);
+    if (XR_FAILED(r)) {
+        log("openxr: xrAcquireSwapchainImage (overlay): %d", (int)r);
+        return;
+    }
+    h.overlay_acquired = true;              // released after the frame's submit (layers_release)
+    XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wi.timeout = XR_INFINITE_DURATION;
+    r = xrWaitSwapchainImage(h.overlay, &wi);
+    if (XR_FAILED(r) || r == XR_TIMEOUT_EXPIRED || index >= h.overlay_target.framebuffers.size()) {
+        log("openxr: xrWaitSwapchainImage (overlay): %d", (int)r);
+        return;
+    }
+    static const float kTransparent[4] = {0, 0, 0, 0};
+    gpu::renderer_begin_eye_pass(h.r, index, kTransparent, &h.overlay_target);
+    for (const auto &draw : draws) draw(f);
+    gpu::renderer_end_pass(h.r);
+    h.overlay_drawn = true;
+}
+
+bool overlay_compose(Host &h, const XrCompositionLayerProjectionView eyes[2], XrCompositionLayerProjection &layer,
+                     XrCompositionLayerProjectionView views[2])
+{
+    if (!h.overlay_drawn) return false;
+    h.overlay_drawn = false;
+    for (int i = 0; i < 2; ++i) {
+        views[i] = eyes[i];
+        views[i].next = nullptr;
+        views[i].subImage.swapchain = h.overlay;
+    }
+    layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    // premultiplied: cleared to transparent black, opaque draws cover, MSAA edges blend
+    layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    layer.space = h.local;
+    layer.viewCount = 2;
+    layer.views = views;
+    return true;
+}
+
+void overlay_destroy(Host &h)
+{
+    if (h.dev.device) gpu::eye_target_destroy(h.dev, h.overlay_target);
+    if (h.overlay_acquired) xrReleaseSwapchainImage(h.overlay, nullptr);
+    if (h.overlay) xrDestroySwapchain(h.overlay);
+    h.overlay = XR_NULL_HANDLE;
+    h.overlay_images.clear();
+    h.overlay_fdm_images.clear();
+    h.overlay_failed = h.overlay_acquired = h.overlay_drawn = false;
 }
 
 }
@@ -216,6 +349,11 @@ void layer_punch(gpu::Frame &f, Layer *l)
     f.bind(xr::g_punch);
     f.push(&push, sizeof push);
     f.draw(4);
+}
+
+void overlay_draw(std::function<void(gpu::Frame &f)> draw)
+{
+    if (draw) xr::g_overlay.push_back(std::move(draw));
 }
 
 }

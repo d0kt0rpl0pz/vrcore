@@ -11,6 +11,12 @@
  * THE OUTPUTS. haptic / stop_haptics drive the Touch controllers (xrApplyHapticFeedback), pad_rumble a pad's
  * motors (SDL_RumbleGamepad). Called from update.
  *
+ * LAST DEVICE. The menu's pointer shows only while the controllers are the player's latest input. A hand's
+ * `last_input_s` is the last time it had a button, the stick, the trigger or the grip, moved more than 2 cm
+ * (against where it last counted) or became tracked; `last_pad_key_s` the last time a gamepad had a button, stick
+ * or trigger, or a key went down. controller_shown(hand) is the rule: tracked, and newer than the pads and keys.
+ * The host keeps both (input.cpp); a front reads them.
+ *
  * Poses are in the host's LOCAL space (the room, as the eye poses in gpu::Eye): metres, y up, -z forward.
  */
 #pragma once
@@ -39,6 +45,9 @@ struct Hand {
     bool primary = false;           // A (right) / X (left)
     bool secondary = false;         // B (right) / Y (left)
     bool menu = false;              // the left controller's menu button (the right one's is the runtime's)
+    Pose aim;                       // the aim pose: where a ray from this hand starts and points (-z), at the display time
+    bool aim_tracked = false;       // `aim`'s position and orientation are valid this frame
+    double last_input_s = -1;       // when this hand last had input (LAST DEVICE, below); the host's clock, -1 never
 };
 
 // One gamepad, SDL's names (the Xbox layout: south A, east B, west X, north Y).
@@ -81,6 +90,13 @@ struct Input {
     bool shift = false, alt = false, ctrl = false;  // either side
     Mouse mouse;
     float dt = 0;                                   // seconds since the last snapshot (0 on the first)
+    double last_pad_key_s = -1;                     // when a pad or the keyboard last had input (LAST DEVICE); -1 never
+
+    // The controller is tracked and its last input is newer than the last pad or key input.
+    bool controller_shown(int hand) const
+    {
+        return hands[hand].tracked && hands[hand].last_input_s > last_pad_key_s;
+    }
 
     const Pad *pad(uint32_t id) const               // null: not there (removed)
     {

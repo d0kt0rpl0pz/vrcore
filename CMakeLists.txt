@@ -148,6 +148,7 @@ add_library(vrcore_host STATIC
     host/gpu/eye_target.cpp
     host/gpu/render.cpp
     host/gpu/vk_impl.cpp
+    host/ui/controllers.cpp
     host/ui/graphics.cpp
     host/ui/imgui_render.cpp
     host/ui/menu.cpp
@@ -186,7 +187,11 @@ endif()
 # the menus (ui/): Dear ImGui's draw data into the layers, both hosts
 vrcore_add_shaders(vrcore_host imgui.vert ${VRCORE_SHADER_DIR}/imgui.vert)
 vrcore_add_shaders(vrcore_host imgui.frag ${VRCORE_SHADER_DIR}/imgui.frag)
-# the hand wheel (rig/wheel_model): its shaders on both hosts; its model from assets/ (the APK's assets on Android)
+# the controllers and the ray (ui/controllers): the test scene's lit shader, a model and a colour a draw
+vrcore_add_shaders(vrcore_host controller.vert ${VRCORE_SHADER_DIR}/scene.vert)
+vrcore_add_shaders(vrcore_host controller.frag ${VRCORE_SHADER_DIR}/scene.frag)
+# the hand wheel (rig/wheel_model): its shaders on both hosts; its model from assets/ (the APK's assets on Android),
+# as are the controllers' (ui/controllers)
 vrcore_add_shaders(vrcore_host wheel.vert ${VRCORE_SHADER_DIR}/wheel.vert)
 vrcore_add_shaders(vrcore_host wheel.frag ${VRCORE_SHADER_DIR}/wheel.frag)
 if(NOT ANDROID)
@@ -248,6 +253,11 @@ if(NOT (ANDROID AND VRCORE_FRONT_DIR))
     vrcore_add_shaders(vrcore_scene panel.frag ${VRCORE_SHADER_DIR}/panel.frag)
     vrcore_add_shaders(vrcore_scene offscreen.vert ${VRCORE_SHADER_DIR}/offscreen.vert)
     vrcore_add_shaders(vrcore_scene offscreen.frag ${VRCORE_SHADER_DIR}/offscreen.frag)
+endif()
+# The menu sample: no game, only the menu. The sim only: on Android an app is libmain.so, and
+# the scene's already is.
+if(NOT ANDROID)
+    vrcore_add_app(vrcore_menu SOURCES host/test/menu_front.cpp)
 endif()
 if(VRCORE_FRONT_DIR)
     add_subdirectory(${VRCORE_FRONT_DIR} ${CMAKE_CURRENT_BINARY_DIR}/front)

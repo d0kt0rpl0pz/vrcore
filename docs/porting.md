@@ -194,9 +194,66 @@ The fronts that exist so far all have the same shape, which is a good template f
   `host/gpu/render.h` (descriptor sets, reverse-Z depth, linear colour).
 
 What the host gives a front without any work: the seat and recentring, look-behind, the free camera and explore
-mode, the menu panel and its navigation, graphics profiles and the refresh rate, eye resolution, foveation and
-sharpening, the "could not start" panel with the ROM picker, spatial speakers, the settings file, and the self test
-and soak test.
+mode, the menu panel and its navigation, the controller pointer in the menu (below), graphics profiles and the
+refresh rate, eye resolution, foveation and sharpening, the "could not start" panel with the ROM picker, spatial
+speakers, the settings file, and the self test and soak test.
+
+### The menu
+
+A front's pages are `std::vector<ui::Item>` (`ui/menu.h`), handed to `ui::Menu`. The menu owns the panel, the
+selection, the keys, the pointer and the controllers. The front owns what the rows say and do.
+
+**Row builders.** Each returns an `Item`; set `gap` (a blank line above) and `help` (shown while selected) on it and
+push it into a page:
+
+| Builder | Row | D-pad / keys | Pointer |
+|---|---|---|---|
+| `toggle(label, get, set, on, off)` | On / Off | left / right or A flips | a click anywhere on the row flips it |
+| `choice(label, labels, get, set)` | one of a list | left / right cycles | a click opens a dropdown under the value |
+| `stepper(label, get, set, step, lo, hi, format, reset)` | a number | left / right steps, A resets | `<` `>` halves step, held repeats; a Reset button when `reset` is given |
+| `action(label, fn)` | a button row | A runs it | a click runs it |
+| `page(label, sub)` | a sub page | A enters | a click enters |
+| `confirm(label, fn)` | No / Yes | right to Yes, right or A to the button, A runs | click the row to flip, click the "Confirm label" button |
+| `Menu::return_item()` | back one page (the top page closes the menu) | A | a click is B |
+
+Every builder fills the same `value` / `change` / `press` / `sub` fields an item always had, so the d-pad, stick and
+keyboard take the same paths whatever the kind; the kind only adds what the pointer and the picture do (`Item::kind`,
+`Kind`). **An item filled in by hand** (label, `value`, `change`) still works and looks as it did: `Kind::Legacy`,
+no `<` `>`, and a pointer click is A. New `Item` fields are only ever added at the struct's end.
+
+**The pointer.** While a controller is showing, the right hand's aim ray (the left's only while the right is not
+tracked; there is no handedness setting) is cast at the panel and the boxes. Hovering a row selects it, the same
+selection the d-pad moves, so whichever was used last wins and there is no mode switch. The trigger's press does
+what A does on the hovered part of the row. The CONTROLS legend and a front's `Box`es stop the ray but are not
+clickable, and nothing scrolls. A hover change gives a light haptic tick, a click a stronger one. The cursor dot and
+the row's glow are drawn into the panel's own texture.
+
+**The hide rule.** A controller (and its ray) shows only while the menu or the message panel is up, it is tracked,
+and its last input (a button, the stick, trigger or grip, or more than about 2 cm of movement) is newer than the
+last gamepad or key input (`Input::controller_shown`, `app/input.h`). Any pad or key press hides both and the menu
+looks as it did before a pointer existed; picking a controller up brings them back. They never draw in the game.
+
+**The hint line.** The controls line at the bottom of the panel is the host's: pointer wording ("point and pull the
+trigger", "B back, menu close") while a controller shows, the d-pad wording otherwise. Both are counted when the
+panel is sized, so it does not change size with the switch. A front's own CONTROLS legend is not touched.
+
+**The controllers and the ray** are drawn by the menu itself (`ui/controllers.h`): the generic trigger / squeeze /
+thumbstick controller models (`assets/controller_left.glb`, `controller_right.glb`) at each shown hand's grip, and a
+thin ray from the pointing hand's aim to what it hits (2 m when it hits nothing, yellow over something clickable).
+A front draws nothing for them.
+
+**`overlay_draw`** (`app/layers.h`) is the hook that makes this possible, and a front may use it too. The panel and
+boxes are compositor quad layers, which sit over the eye pass, so a controller drawn there would vanish behind them.
+`overlay_draw(fn)`, called in `prepare` on every frame it is wanted, runs `fn(Frame&)` in a second transparent
+projection layer composited above all the quads (on the desktop sim, at the end of the eye pass after them). It uses
+the eye pipelines and views, has its own depth, and costs nothing on frames it is not asked for.
+
+**What a front gets for free:** the pointer, the cursor, haptics, the hint line, the controller models and ray, the
+hide rule, the dropdown and the row kinds' pictures, and sizing (the panel reserves room for the longest choice list,
+the Confirm button and each row's reserved value, so it never grows while open). A front writes its pages and
+nothing else. `host/test/menu_front.cpp` (the `vrcore_menu` target, desktop only, built beside `vrcore_scene`) is a game-free
+page set using every kind; `--menu` opens it at the start and `--page NAME` on a sub page, for a headless `--shot`; in the sim the mouse is the right controller (left button the
+trigger, `P` pretends a gamepad was pressed).
 
 ## Building
 

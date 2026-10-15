@@ -11,7 +11,15 @@
  * Keys: the keyboard is the front's (app/input.h: a game's keys win, with no fake
  * head); the fake head takes them only while Option is held: Option + the arrows look, Option + W A S D move in
  * the yaw plane, Q down, E up, Shift x4. Right mouse drag looks; R resets the head; Tab toggles side by side;
- * closing the window quits (Escape is the front's: its menu). No Touch controllers: the hands read inactive.
+ * closing the window quits (Escape is the front's: its menu).
+ *
+ * THE FAKE CONTROLLER. With a window, the right hand is a controller held 25 cm right of, 30 cm below and 30 cm
+ * ahead of the head (turning with its yaw), always tracked, and moving a few centimetres across that with the
+ * mouse's place in the window, so that it counts as movement (app/input.h LAST DEVICE). Its aim passes through the
+ * point under the mouse, taken on the plane 1.1 m ahead of that eye (the menu's distance); the left button is its
+ * trigger. Any key press is a pad or key input and hides the controllers (the menu's rule): P does nothing else
+ * here, so it is the key to press for that; moving the mouse brings the controller back. The left hand reads
+ * inactive. Headless, no hands.
  */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -51,6 +59,9 @@ constexpr float kIpd = 0.063f;                // the headset logged 0.0648 at it
 constexpr float kMoveSpeed = 1.5f;       // m/s
 constexpr float kLookRate = 1.5f;        // rad/s on the arrow keys
 constexpr float kMouseSens = 0.0025f;    // rad per pixel
+// the fake right controller (THE FAKE CONTROLLER): its place in the head's yaw frame, how far the mouse moves it
+constexpr float kHandRight = 0.25f, kHandDown = -0.30f, kHandAhead = 0.30f, kHandSway = 0.10f;
+constexpr float kAimPlane = 1.1f;        // the aim's depth in front of the eye
 
 // The Quest 3's per-eye FOV (radians, as OpenXR's XrFovf), as its runtime reported it (v207, 2026-10-10).
 struct Fov { float left, right, up, down; };
@@ -218,6 +229,7 @@ struct Sim {
     int64_t period_ns = 0;                          // the display's (windowed) or --hz's (headless)
     uint32_t recentres = 0;                         // R presses: the headset's recentre
     bool left_pressed = false;                      // the left button went down since the last update (Input::mouse)
+    float aim_dir[3] = {0, 0, -1};                  // the fake controller's aim, kept while the mouse is off the picture
 
     // the graphics asks (request_graphics)
     float eye_pending = 0;                          // an eye resolution asked for, made at eye_at (s); 0: none
@@ -243,6 +255,7 @@ struct Sim {
 
     void poll(float dt);
     void fill_mouse(Mouse &m);
+    void fill_controller(Input &in);
     void update(int64_t display_ns);
     void record_blit(VkCommandBuffer cmd, uint32_t eye_slot, VkImage dst);
     bool frame_windowed(double &cpu_s);
@@ -644,6 +657,48 @@ void Sim::fill_mouse(Mouse &m)
     }
 }
 
+// THE FAKE CONTROLLER: the right hand, from the mouse (the file's head comment).
+void Sim::fill_controller(Input &in)
+{
+    if (!window) return;
+    Hand &hd = in.hands[Input::kRight];
+    const Mouse &m = in.mouse;
+    float s = std::sin(head.yaw), c = std::cos(head.yaw);
+    float rx = c, rz = -s, fx = -s, fz = -c;                // the yaw frame's right and forward
+    float sx = m.inside ? m.nx - 0.5f : 0.f, sy = m.inside ? 0.5f - m.ny : 0.f;
+    float right = kHandRight + sx * kHandSway * 2.f, up = kHandDown + sy * kHandSway * 2.f;
+    float *p = hd.grip.pos;
+    p[0] = head.pos[0] + rx * right + fx * kHandAhead;
+    p[1] = head.pos[1] + up;
+    p[2] = head.pos[2] + rz * right + fz * kHandAhead;
+
+    if (m.eye >= 0) {
+        gpu::Eye eyes[2];
+        make_eyes(head, eyes);
+        const Fov &f = kEyeFov[m.eye];
+        float tl = std::tan(f.left), tr = std::tan(f.right), tu = std::tan(f.up), td = std::tan(f.down);
+        float vx = (tl + m.eye_u * (tr - tl)) * kAimPlane, vy = (tu + m.eye_v * (td - tu)) * kAimPlane, vz = -kAimPlane;
+        // the eye's view vector to the room: pitch about x, then yaw about y
+        float cp = std::cos(head.pitch), sp = std::sin(head.pitch);
+        float px = vx, py = vy * cp - vz * sp, pz = vy * sp + vz * cp;
+        float wx = px * c + pz * s, wy = py, wz = -px * s + pz * c;
+        float tx = eyes[m.eye].pos[0] + wx - p[0], ty = eyes[m.eye].pos[1] + wy - p[1],
+              tz = eyes[m.eye].pos[2] + wz - p[2];
+        float n = std::sqrt(tx * tx + ty * ty + tz * tz);
+        if (n > 1e-4f) {
+            aim_dir[0] = tx / n;
+            aim_dir[1] = ty / n;
+            aim_dir[2] = tz / n;
+        }
+    }
+    float yaw = std::atan2(-aim_dir[0], -aim_dir[2]), pitch = std::asin(std::clamp(aim_dir[1], -1.f, 1.f));
+    Quat q = quat_mul(quat_axis_angle(0, 1, 0, yaw), quat_axis_angle(1, 0, 0, pitch));
+    hd.grip.rot = q;                                        // grip and aim alike: the model is not tilted
+    hd.aim = hd.grip;
+    hd.active = hd.tracked = hd.aim_tracked = true;
+    hd.trigger = m.left ? 1.f : 0.f;
+}
+
 // The front's update for a frame shown at `display_ns`; a quit it asks for ends the loop.
 void Sim::update(int64_t display_ns)
 {
@@ -655,6 +710,7 @@ void Sim::update(int64_t display_ns)
     in.head.rot = head_orientation(head);
     for (int i = 0; i < 3; ++i) in.head.pos[i] = head.pos[i];
     fill_mouse(in.mouse);
+    fill_controller(in);
     input_begin_frame(steady_ns() * 1e-9);
     if (in.alt) {                                       // Option held: the keys are the fake head's, not the front's
         std::fill(std::begin(in.keys), std::end(in.keys), false);

@@ -23,3 +23,6 @@ SOFTWARE.
 Third-party assets keep their own licenses and are not covered by the above:
 assets/wheel.glb is
 "MOMO STEERING WHEEL" by ijiklvn, under CC BY 4.0 (see README.md, Credits).
+assets/controller_left.glb and assets/controller_right.glb are
+the generic controller models of immersive-web/webxr-input-profiles, under MIT, Copyright (c) 2019 Amazon (see
+THIRD_PARTY.md).

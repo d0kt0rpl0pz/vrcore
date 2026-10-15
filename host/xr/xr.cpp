@@ -2,7 +2,8 @@
  * xr.cpp -- the OpenXR host (Android): the loader, the instance (required / optional extensions), the
  * system, Vulkan through XR_KHR_vulkan_enable2, the session state machine, the LOCAL space and the frame
  * loop. xrWaitFrame paces the loop; each frame draws both eyes in one multiview pass and submits one
- * projection layer whose two views are exactly the ones it rendered with. Between frames the front's graphics asks
+ * projection layer whose two views are exactly the ones it rendered with (and, on frames that ask, the overlay's,
+ * over the quad layers: app/layers.h). Between frames the front's graphics asks
  * (app.h's request_graphics) are applied: the rate, foveation and sharpening at once, the eye resolution once it
  * has rested 0.5 s. The eye pass is always 4x MSAA.
  */
@@ -435,8 +436,9 @@ bool render(Host &h, Stats &st, const gpu::Eye eyes[2], bool &fatal)
     gpu::renderer_begin_eye_pass(h.r, image, h.info->clear ? h.info->clear : gpu::kClear);
     h.info->draw(f);
     gpu::renderer_end_pass(h.r);
+    overlay_render(h, f);                   // app/layers.h's overlay, on frames that ask for it
     bool ok = gpu::renderer_submit(h.r);
-    layers_release(h);                      // the layers' images drawn this frame, after the submit
+    layers_release(h);                      // the layers' (and the overlay's) images drawn this frame, after the submit
     st.cpu += now_s() - t0;
     // A failed submit leaves its slot's fence unsignalled: the next renderer_begin would wait for ever.
     fatal = !ok;
@@ -495,6 +497,8 @@ bool frame(Host &h, Stats &st, bool &rendered)
     XrCompositionLayerProjectionView pviews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                                   {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     XrCompositionLayerProjection layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    XrCompositionLayerProjectionView oviews[2];
+    XrCompositionLayerProjection overlay;
     static std::vector<XrCompositionLayerQuad> quads, under;
     static std::vector<const XrCompositionLayerBaseHeader *> layers;
     layers.clear();
@@ -568,6 +572,9 @@ bool frame(Host &h, Stats &st, bool &rendered)
         }
         for (const XrCompositionLayerQuad &q : quads)
             layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader *>(&q));
+        // the overlay (app/layers.h), last: over the quads, drawn with the eyes' views (only when they were drawn)
+        if (rendered && overlay_compose(h, pviews, overlay, oviews))
+            layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader *>(&overlay));
     }
 
     XrFrameEndInfo ei = {XR_TYPE_FRAME_END_INFO};
@@ -660,6 +667,7 @@ void teardown(Host &h)
 {
     if (h.dev.device) vkDeviceWaitIdle(h.dev.device);
     if (h.front_up) h.info->shutdown(h.r.renderer);
+    overlay_destroy(h);
     gpu::renderer_destroy(h.r);
     if (h.dev.device) gpu::eye_target_destroy(h.dev, h.target);
     swapchain_destroy(h);

@@ -30,8 +30,29 @@
  * THE MESSAGE PANEL: while Hooks::message gives a text (the game could not start), the panel shows it in place
  * of the menu, with the pick hook's lines under it (the file picker's row), and no boxes beside.
  *
- * RESTART: the row reads No until moved to Yes, then A restarts; No again on every page
- * change. The game starts again from power-on: app.h's request_restart.
+ * THE POINTER. While Input::controller_shown, the right hand's aim ray (the left's only while the right is not
+ * tracked) is cast at the panel and the boxes' quads (the room's, as prepare placed them). Hovering a row selects it
+ * (the same selection the d-pad moves: the last used wins); the trigger's rising edge does what A does on it. The
+ * CONTROLS and front boxes stop the ray but are not clickable. The cursor dot and the row's glow are drawn into the
+ * quad's own texture; a light haptic tick when the hovered row changes, a stronger one on a click. The controls
+ * line reads the pointer wording while a controller shows.
+ *
+ * THE ROW KINDS. An Item built the old way (value + change, press, sub) has Kind::Legacy: it looks and navigates as it
+ * always did, and the pointer's click on it is A. The builders below set a kind (and its data) on top of the same
+ * value / change / press / sub fields, so the d-pad, stick, keyboard and A / B do exactly what they did for every
+ * kind; only the pointer and the picture differ:
+ *   toggle    a click anywhere on the row flips it
+ *   choice    `v` beside the value; a click opens a dropdown under it (pointer only; the d-pad cycles as before);
+ *             click a choice, or outside, or B, to leave it. The room for the list is reserved when the page is
+ *             entered (SIZES), the list hangs over the rows below it.
+ *   stepper   `<` `>` either side of the value; a click on its left or right half steps by one, a held trigger
+ *             repeats (0.35 s, then every 0.12 s). With a reset: a small Reset button after it, which does what A does.
+ *   action    a click runs it         page   `>` at the end, a click enters it         return   a click is B
+ *   confirm   No / Yes; at Yes a "Confirm <label>" button appears after the value. Pointer: click it. D-pad: right
+ *             again (or A) lands on it, A runs it. Leaving the row or the page puts it back to No.
+ *
+ * RESTART (Menu::restart_item, the old way): the row reads No until moved to Yes, then A restarts; No again on every
+ * page change. The game starts again from power-on: app.h's request_restart.
  *
  * FOCUS LOSS: the headset took the app's focus away (the system menu, the
  * headset off): the menu opens, which pauses the game. Android only (Hooks::open_on_focus_loss).
@@ -42,11 +63,13 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "app.h"
+#include "controllers.h"
 #include "gpu/render.h"
 #include "input.h"
 
@@ -62,6 +85,9 @@ namespace vrcore::ui {
 struct Item;
 using Page = std::vector<Item>;
 
+// How an Item behaves under the pointer and how it is drawn (THE ROW KINDS). Legacy: built the old way.
+enum class Kind : uint8_t { Legacy, Toggle, Choice, Stepper, Action, Page, Return, Confirm };
+
 struct Item {
     std::string label;
     std::function<std::string()> value;     // empty: an action
@@ -72,7 +98,30 @@ struct Item {
     bool gap = false;                       // a blank line above it: a new group starts here
     const char *help = nullptr;             // shown at the bottom while selected (HELP)
     bool reserve = false;                   // its value may gain Hooks::value_reserve: room kept for it (SIZES)
+    // Set by the builders (THE ROW KINDS), at the end so a front's own field-by-field items are untouched.
+    Kind kind = Kind::Legacy;
+    std::vector<std::string> choices;       // Choice: the labels the dropdown lists
+    std::function<int()> index;             // Choice: the current one
+    std::function<void(int)> pick;          // Choice: the dropdown chose this one
+    std::function<void()> reset;            // Stepper: the Reset button (and A); empty: no button
+    std::function<void()> run;              // Confirm: what the button does
+    std::shared_ptr<bool> armed;            // Confirm: Yes (shared by the copies pages make of the item)
 };
+
+// The row builders. Each returns an Item to set `gap` and `help` on and push into a Page.
+Item toggle(const std::string &label, std::function<bool()> get, std::function<void(bool)> set,
+            const char *on_text = "On", const char *off_text = "Off");
+Item choice(const std::string &label, std::vector<std::string> labels, std::function<int()> get,
+            std::function<void(int)> set);
+// A number from `lo` to `hi` in steps of `step` (left / right and the pointer's halves move it one step); `format`
+// writes it. `reset` (optional) is what A does and what the Reset button runs.
+Item stepper(const std::string &label, std::function<float()> get, std::function<void(float)> set, float step,
+             float lo, float hi, std::function<std::string(float)> format, std::function<void()> reset = nullptr);
+Item action(const std::string &label, std::function<void()> run);
+Item page(const std::string &label, Page &sub);
+// Yes / No, and a "Confirm <label>" button at Yes that calls `run` (which closes the menu itself, if it should).
+Item confirm(const std::string &label, std::function<void()> run);
+
 
 // A front's box beside the panel (Daytona's records), drawn on the menu's
 // background with the menu's margin round it. The boxes of a side run outwards in the order given, each kHinge
@@ -153,6 +202,8 @@ public:
 
     // `saved` runs before the restart (the front's saves). Shared by the rows made from it.
     Item restart_item(std::function<void()> saved, bool gap = false);
+    // The Return row (Kind::Return): a click or A goes back a page (the top page: closes the menu).
+    Item return_item();
 
 private:
     struct Line;
@@ -160,11 +211,16 @@ private:
     void build_lines(std::vector<Line> &out, bool &has_help);
     void build_message(std::vector<Line> &out);
     void draw_panel(ImDrawList *dl, float ox, float oy, const std::vector<Line> &lines, float w, float h);
-    float line_width(const Line &l) const;
+    float layout(const Line &l, std::vector<float> *xs = nullptr) const;
+    void item_segs(const Item &it, bool selected, float column, bool worst, Line &l) const;
+    void disarm(Page *p, const Item *except = nullptr);
+    void run_confirm(Item &it);
+    bool armed(const Item &it) const { return it.armed && *it.armed; }
     std::vector<std::string> wrap_help(const char *text, float width) const;
     float value_column(const Page &p) const;
     float widest() const;
     float tallest(const Page &p) const;
+    void point(const Input &in, bool &click);
 
     Hooks hooks_;
     Page *top_ = nullptr, *page_ = nullptr;
@@ -200,6 +256,39 @@ private:
     const Page *sized_page_ = nullptr;
     float page_w_ = 0, page_h_ = 0;
     float menu_w_ = 0;                      // every page's text width this opening (SIZES; 0: not measured)
+
+    // THE POINTER: the quads as prepare hung them (the room's metres; id 0 panel, 1 CONTROLS, 2 + i box i), where
+    // the ray lands, and the rows' top and height in the panel's pixels
+    struct Quad {
+        float c[3];
+        float yaw, w, h;
+        int id;
+    };
+    std::vector<Quad> quads_;
+    struct RowRect {
+        float y, h;
+        // x edges in the panel's pixels (-1: none): the stepper's `<` start and `>` end, its Reset button, the
+        // Confirm button, the value's start (the dropdown hangs from it)
+        float dec0 = -1, inc1 = -1, reset0 = -1, reset1 = -1, conf0 = -1, conf1 = -1, val0 = -1;
+    };
+    std::vector<RowRect> rows_;
+    int hit_id_ = -1;                       // the quad under the ray (-1 none)
+    float hit_t_ = 0;                       // metres along the ray to it
+    // THE CONTROLLERS: each hand as update saw it (shown by the rule, its grip and aim), drawn on the overlay
+    ControllerModels models_;
+    ControllerModels::Draw ctl_[2];
+    float hit_x_ = 0, hit_y_ = 0;           // the point on it, in that layer's own pixels from its top left
+    int hover_row_ = -1;                    // the visible row under the ray (-1 none; only on the panel)
+    int pointing_ = -1;                     // the hand that points (Input::kLeft / kRight), -1 none
+    bool trigger_was_[2] = {}, trigger_pressed_[2] = {};
+    bool pointer_hint_ = false;             // a controller shows: the controls line reads the pointer wording
+    int hover_zone_ = 0;                    // the part of the hovered row under the ray (menu.cpp Zone)
+    int dropdown_ = -1;                     // the visible row whose dropdown is open (-1 none)
+    int drop_hover_ = -1;                   // the dropdown's choice under the ray
+    float drop_x0_ = 0, drop_y0_ = 0, drop_x1_ = 0, drop_y1_ = 0;   // its rectangle in the panel's pixels
+    bool button_focus_ = false;             // d-pad: the selected Confirm row's button has the focus
+    bool ptr_hold_ = false;                 // a stepper's half is held with the trigger (repeats)
+    double ptr_repeat_at_ = 0;
 
     // the picture
     void *ctx_ = nullptr;                   // ImGuiContext
