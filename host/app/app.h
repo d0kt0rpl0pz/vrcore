@@ -36,6 +36,7 @@ struct Options {
     const char *rig_test = nullptr; // --rig-test DIR: (Mac) run the rig's device-free checks into DIR, then quit:
                                 //   exit 0 = all passed
     const char *audio_test = nullptr;   // --audio-test DIR: (Mac) the sound's device-free checks, the same way
+    const char *soundtrack_test = nullptr;  // --soundtrack-test DIR: (Mac) the soundtrack's device-free checks
     const char *settings_test = nullptr;    // --settings-test DIR: (Mac) the settings file's device-free checks
     bool graphics_test = false; // --graphics-test: (sim) asks the eye resolution by display frame (sim.cpp)
     bool spatial = true;        // --spatial 0|1: the cabinet speakers through Steam Audio, or the plain stereo

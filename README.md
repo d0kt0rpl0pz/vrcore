@@ -94,6 +94,9 @@ The comment at the head of `tools/vr_plugin_test.c` documents every `VR_TEST_*` 
 plugin's output unchanged: run with `VR_TEST_HASH=<prefix>` and `VR_TEST_ARGS="--replay f.rec"` before and after the
 change, then compare the hash files.
 
+The host's device-free checks (Mac sim, any built front): `--rig-test DIR`, `--audio-test DIR`, `--settings-test DIR`
+and `--soundtrack-test DIR` (the player's music: folder scan, decoders, ring, shuffle, the game's music volume).
+
 The Quest scripts print their usage with `--help`. Set `VR_DRY_RUN=1` to print the adb commands without a headset.
 
 ## License

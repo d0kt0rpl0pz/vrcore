@@ -154,6 +154,7 @@ add_library(vrcore_host STATIC
     host/ui/imgui_render.cpp
     host/ui/menu.cpp
     host/ui/pick.cpp
+    host/ui/soundtrack_page.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui_draw.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui_tables.cpp
@@ -172,7 +173,7 @@ if(ANDROID)
         host/audio/decode_android.cpp)
 else()
     target_sources(vrcore_host PRIVATE host/audio/decode_apple.cpp)
-    target_sources(vrcore_host PRIVATE host/rig/rig_test.cpp host/audio/audio_test.cpp host/app/settings_test.cpp host/sim/sim.cpp host/sim/sim_layers.cpp)
+    target_sources(vrcore_host PRIVATE host/rig/rig_test.cpp host/audio/audio_test.cpp host/app/settings_test.cpp host/ui/soundtrack_test.cpp host/sim/sim.cpp host/sim/sim_layers.cpp)
     find_library(VRCORE_MOLTENVK NAMES MoltenVK HINTS /opt/homebrew/lib /usr/local/lib)
     if(NOT VRCORE_MOLTENVK)
         message(FATAL_ERROR "vrcore: no MoltenVK (brew install molten-vk)")
