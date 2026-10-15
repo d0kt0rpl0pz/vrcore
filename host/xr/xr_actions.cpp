@@ -4,7 +4,8 @@
  *
  * THE PROFILES. Bindings are suggested for each profile the runtime may pick: oculus/touch_controller (always),
  * meta/touch_controller_plus (XR_META_touch_controller_plus offered: the
- * Quest 3's own), khr/simple_controller (trigger as select, menu, grip pose), valve/index_controller (SteamVR),
+ * Quest 3's own), htc/vive_controller, bytedance/pico4_controller and pico_neo3_controller (the Pico two with
+ * XR_BD_controller_interaction offered), khr/simple_controller (trigger as select, menu, grip pose), valve/index_controller (SteamVR),
  * valve/frame_controller_valve (XR_VALVE_frame_controller_interaction offered; its paths are not in the pinned
  * registry, 1.1.63, so Index's are suggested and a refusal is only logged). One profile refusing its bindings
  * does not stop the rest. The profile in force is logged when the runtime says it changed.
@@ -207,12 +208,44 @@ bool actions_create(Host &h)
         {&Actions::secondary, "/input/b/click", "/input/b/click"},
         {&Actions::haptic, "/output/haptic", "/output/haptic"},
     };
+    // Vive wand: the grip button is a click only (read as a float of 0 or 1), the trackpad is the stick; no A / B.
+    static const Bind kVive[] = {
+        {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},
+        {&Actions::aim, "/input/aim/pose", "/input/aim/pose"},
+        {&Actions::trigger, "/input/trigger/value", "/input/trigger/value"},
+        {&Actions::stick, "/input/trackpad", "/input/trackpad"},
+        {&Actions::stick_click, "/input/trackpad/click", "/input/trackpad/click"},
+        {&Actions::squeeze, "/input/squeeze/click", "/input/squeeze/click"},
+        {&Actions::menu, "/input/menu/click", nullptr},
+        {&Actions::haptic, "/output/haptic", "/output/haptic"},
+    };
+    // Pico 4 and Neo 3: the Touch layout (A / B and X / Y, thumbstick, menu on the left)
+    static const Bind kPico[] = {
+        {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},
+        {&Actions::aim, "/input/aim/pose", "/input/aim/pose"},
+        {&Actions::trigger, "/input/trigger/value", "/input/trigger/value"},
+        {&Actions::squeeze, "/input/squeeze/value", "/input/squeeze/value"},
+        {&Actions::stick, "/input/thumbstick", "/input/thumbstick"},
+        {&Actions::stick_click, "/input/thumbstick/click", "/input/thumbstick/click"},
+        {&Actions::primary, "/input/x/click", "/input/a/click"},
+        {&Actions::secondary, "/input/y/click", "/input/b/click"},
+        {&Actions::menu, "/input/menu/click", nullptr},
+        {&Actions::haptic, "/output/haptic", "/output/haptic"},
+    };
+    constexpr size_t kViveN = sizeof kVive / sizeof kVive[0], kPicoN = sizeof kPico / sizeof kPico[0];
     constexpr size_t kTouchN = sizeof kTouch / sizeof kTouch[0], kSimpleN = sizeof kSimple / sizeof kSimple[0],
                      kIndexN = sizeof kIndex / sizeof kIndex[0];
     suggest(h, a, "/interaction_profiles/oculus/touch_controller", kTouch, kTouchN);
     if (h.ext.touch_plus) suggest(h, a, "/interaction_profiles/meta/touch_controller_plus", kTouch, kTouchN);
     suggest(h, a, "/interaction_profiles/khr/simple_controller", kSimple, kSimpleN);
     suggest(h, a, "/interaction_profiles/valve/index_controller", kIndex, kIndexN);
+    // Vive: a core profile. Pico's two belong to XR_BD_controller_interaction (without it the call is refused).
+    // Neither was checked on hardware: the log line says "suggested" or "refused".
+    suggest(h, a, "/interaction_profiles/htc/vive_controller", kVive, kViveN);
+    if (h.ext.pico) {
+        suggest(h, a, "/interaction_profiles/bytedance/pico4_controller", kPico, kPicoN);
+        suggest(h, a, "/interaction_profiles/bytedance/pico_neo3_controller", kPico, kPicoN);
+    }
     if (h.ext.frame_controller) suggest(h, a, "/interaction_profiles/valve/frame_controller_valve", kIndex, kIndexN);
     return true;
 }
@@ -322,6 +355,10 @@ void actions_profile_changed(Host &h)
             uint32_t n = 0;
             xrPathToString(h.instance, s.interactionProfile, sizeof name, &n, name);
         }
+        static const char kPrefix[] = "/interaction_profiles/";
+        const char *bare = SDL_strncmp(name, kPrefix, sizeof kPrefix - 1) == 0 ? name + sizeof kPrefix - 1
+                         : s.interactionProfile == XR_NULL_PATH ? "" : name;
+        input_set_profile(i, bare);
         log("xr: %s hand profile %s", i ? "right" : "left", name);
     }
 }

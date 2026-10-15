@@ -14,7 +14,7 @@
  *   depth:            reverse-Z (1 near, 0 far, cleared to 0); a pipeline's depth_compare is the Vulkan one
  *                     (Less on a reversed-Z target is Greater, LEqual is GreaterOrEqual).
  *   stencil:          the eye pass has 8 bits, cleared to 0 (offscreen targets have none).
- *   colour:           linear; sRGB images (the eyes, RGBA8_sRGB textures and targets) encode and decode.
+ *   colour:           linear; sRGB images (the eyes, RGBA8_sRGB and ASTC_*_sRGB textures, targets) encode and decode.
  *   blending:         "Blend A B": the same factors for colour and alpha.
  */
 #pragma once
@@ -38,6 +38,7 @@ constexpr uint32_t kMaxTextures = 8;        // set 2's bindings
 // shader that writes its own depth (reverse-Z near / w) or clips at the near plane takes kEyeNear.
 constexpr float kEyeNear = 0.1f, kEyeFar = 1000.f;
 constexpr uint32_t kUniformBytes = 4096;    // set 1's block
+constexpr uint32_t kMaxMips = 16;           // a texture's mip levels, at most
 
 enum class BufferUsage { Vertex, Index };
 enum class IndexType { U16, U32 };
@@ -48,7 +49,9 @@ enum class Cull { None, Back, Front };
 enum class Blend { Opaque, Alpha, Premultiplied, Additive };
 enum class Compare { Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always };
 enum class StencilOp { Keep, Zero, Replace, IncrementWrap, DecrementWrap };
-enum class TextureFormat { R8, RGBA8, RGBA8_sRGB };
+// ASTC: LDR, 16-byte blocks of 4x4 or 6x6 texels, where Renderer::astc() says the device has it (Quest 3, Apple
+// silicon). A compressed texture is sampled only: no target and no offscreen pipeline is made of one.
+enum class TextureFormat { R8, RGBA8, RGBA8_sRGB, ASTC_4x4, ASTC_4x4_sRGB, ASTC_6x6, ASTC_6x6_sRGB };
 enum class Filter { Nearest, Linear };
 enum class Address { Clamp, Repeat, RepeatU };   // RepeatU: across repeated, down clamped (a panorama)
 enum class Pass { Eye, Offscreen };
@@ -101,7 +104,17 @@ struct TextureDesc {
     TextureFormat format = TextureFormat::RGBA8;
     Filter filter = Filter::Nearest;
     Address address = Address::Clamp;
+    uint32_t mips = 1;                      // levels (level 0 is width x height, each next one half, down to 1x1);
+                                            //   more than the chain has, or kMaxMips, is cut. Linear filtering
+                                            //   blends between levels, Nearest picks one.
 };
+
+// The data create_texture, update_texture and Frame::upload take for `d`: the mip levels one after the other,
+// level 0 first, each level's rows tightly packed (a block row for ASTC, with partial blocks at the right and
+// bottom edges) and each level starting on a 4-byte boundary (a no-op for all but small R8 levels).
+uint32_t texture_mip_count(const TextureDesc &d);                   // d.mips, cut to what the texture can have
+size_t texture_level_offset(const TextureDesc &d, uint32_t level);  // where `level` starts
+size_t texture_bytes(const TextureDesc &d);                         // the whole of it
 
 // One eye's view this frame (from OpenXR's located views, or the sim's fake head).
 struct Eye {
@@ -115,7 +128,7 @@ struct Eye {
 class Frame {
 public:
     // ---- prepare (outside any pass) ----
-    // A texture's whole contents, rows tightly packed (width x height x the format's bytes), from this frame on.
+    // A texture's whole contents (every mip level, laid out as texture_bytes counts), from this frame on.
     void upload(Texture *t, const void *data);
     // This frame's contents of `b`: `bytes` to write at the pointer returned (null when it could not grow). The
     // buffer keeps them for every later frame until the next write; one write a frame (a second one in the
@@ -158,8 +171,9 @@ public:
     DynamicBuffer *create_dynamic_buffer(BufferUsage usage, size_t initial_bytes);
     void destroy_dynamic_buffer(DynamicBuffer *b);
 
-    // A 2D texture, no mips; `data` (null: black) as Frame::upload takes it. update_texture waits for the GPU:
-    // for init, not for every frame (Frame::upload).
+    // A 2D texture; `data` (null: black) as Frame::upload takes it. Null when it cannot be made, and for an ASTC
+    // format when astc() is false (logged): the caller falls back to an uncompressed texture. update_texture waits
+    // for the GPU: for init, not for every frame (Frame::upload).
     Texture *create_texture(const TextureDesc &desc, const void *data);
     void update_texture(Texture *t, const void *data);
     void destroy_texture(Texture *t);
@@ -173,6 +187,7 @@ public:
     void destroy_pipeline(Pipeline *p);
 
     bool fdm() const;                       // foveation's density map is on (FragmentDensityEXT usable)
+    bool astc() const;                      // ASTC textures can be made (textureCompressionASTC_LDR)
 
     RendererImpl *impl = nullptr;           // the host's
 };

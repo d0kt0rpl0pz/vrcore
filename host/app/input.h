@@ -109,6 +109,10 @@ struct Input {
 // This frame's snapshot (valid in update; zero before the first).
 const Input &input();
 
+// The interaction profile in force on a hand ("oculus/touch_controller", "valve/index_controller"...), as the runtime
+// last reported it; "" before one is, and always in the sim. Changes between frames: the menu picks its model by it.
+const char *controller_profile(int hand);
+
 // A Touch controller's vibration: `amplitude` 0..1 for `seconds` (a new one replaces the last). No-op in the sim.
 void haptic(int hand, float amplitude, float seconds);
 // Both hands' vibration stopped now.

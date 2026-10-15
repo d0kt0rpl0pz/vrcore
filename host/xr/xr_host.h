@@ -42,6 +42,7 @@ struct Extensions {
     bool thread_settings = false;       // XR_KHR_android_thread_settings
     bool convert_timespec = false;      // XR_KHR_convert_timespec_time (the display time on CLOCK_MONOTONIC)
     bool touch_plus = false;            // XR_META_touch_controller_plus (the Quest 3's controllers' profile)
+    bool pico = false;                  // XR_BD_controller_interaction (bytedance/pico4_controller, pico_neo3_controller)
     bool frame_controller = false;      // XR_VALVE_frame_controller_interaction
     bool layer_settings = false;        // XR_FB_composition_layer_settings (sharpening)
     bool fb_passthrough = false;        // XR_FB_passthrough (passthrough where the core ALPHA_BLEND is not listed)

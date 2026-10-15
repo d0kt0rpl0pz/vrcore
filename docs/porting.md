@@ -8,7 +8,7 @@ pieces around it fit together.
 ## The three pieces
 
 ```
-  the game's repo                                     vrcore (pinned commit)
+  the game's repo                                     vrcore (the clone beside it)
   ┌───────────────────────────────┐                  ┌──────────────────────────────────┐
   │ PLUGIN  libgame_plugin.so     │   vr_* (C ABI)   │ HOST  host/                      │
   │  game code + vrcore native/   │ <─────────────── │  OpenXR session, Vulkan, SDL3,   │
@@ -237,8 +237,12 @@ looks as it did before a pointer existed; picking a controller up brings them ba
 trigger", "B back, menu close") while a controller shows, the d-pad wording otherwise. Both are counted when the
 panel is sized, so it does not change size with the switch. A front's own CONTROLS legend is not touched.
 
-**The controllers and the ray** are drawn by the menu itself (`ui/controllers.h`): the generic trigger / squeeze /
-thumbstick controller models (`assets/controller_left.glb`, `controller_right.glb`) at each shown hand's grip, and a
+**The controllers and the ray** are drawn by the menu itself (`ui/controllers.h`): a model for the
+device in that hand, at each shown hand's grip: the interaction profile the runtime reports for the hand
+(`controller_profile(hand)`, `app/input.h`) picks it (Touch, Touch Plus, Index, Vive, Pico 4, Pico Neo 3 under
+`assets/controllers/`, ASTC textures beside each GLB), and any other profile, or none yet (the sim), gets the generic
+trigger / squeeze / thumbstick pair (`assets/controller_left.glb`, `controller_right.glb`). The host suggests bindings
+for each of those profiles; Pico's need `XR_BD_controller_interaction`. A ray from the pointing hand's aim, and a
 thin ray from the pointing hand's aim to what it hits (2 m when it hits nothing, yellow over something clickable).
 A front draws nothing for them.
 
@@ -257,12 +261,12 @@ trigger, `P` pretends a gamepad was pressed).
 
 ## Building
 
-**Pinning.** vrcore is its own repository, never copied into a game. A game records one full commit hash of vrcore
-in a file it keeps, and a small helper script prints the vrcore folder to build against. That folder is a git
-worktree of a local vrcore clone, checked out at that commit, one folder per commit. Every build step asks the
-helper: the game's CMake, its Android script and its Quest tools. To try an unpushed vrcore change on a game,
-point `VRCORE_DIR` at the working clone. When the change is good, push it and move the pin. Only pushed commits are
-pinned.
+**Finding vrcore.** vrcore is its own repository, never copied into a game. A game keeps a small helper script
+that prints the vrcore folder to build against: a clone of vrcore beside the game's own, as it stands (its latest
+commit and any local changes), cloned when it is not there. Every build step asks the helper: the game's CMake, its
+Android script and its Quest tools. Nothing fetches or checks anything out in that clone; keeping it current is
+done by hand. Set `VRCORE_DIR` to build against another vrcore folder. A game may instead pin one full commit
+hash in a file of its own and have the helper check that commit out as a worktree; none is required to.
 
 **Libraries.** `tools/fetch_extern.py --extern <dir>` fetches the pinned third-party sources (`THIRD_PARTY.md`):
 SDL 3, Dear ImGui, the OpenXR SDK, Vulkan-Headers, VMA, volk, cgltf and Steam Audio. A game's setup script calls it
@@ -279,7 +283,11 @@ cmake --build build-native
 ```
 
 It runs the same host and front in a window on MoltenVK, with keyboard and gamepad standing in for the
-controllers.
+controllers. The sim reports no interaction profile, so the menu draws the generic controller pair; **F5 / F6**
+step the family shown on the left / right hand through the table (each press logs the profile and the file), and
+`VR_SIM_PROFILE=<profile string>` sets both hands from the start, which also makes a headless `--shot --menu` draw
+the sim's right hand. Only the right hand is ever drawn in the sim (the mouse is that controller); a key press hides
+the controller until the mouse moves.
 
 **The Quest APK.** The game builds its plugin for arm64-v8a with the NDK (r27d), puts the `.so` (and
 `libphonon.so`) in a `jniLibs/arm64-v8a/` folder, and runs vrcore's Gradle project with its own identity:
@@ -341,5 +349,5 @@ Set `VR_DRY_RUN=1` to print their adb commands with no headset.
 - **The ABI.** A change to `abi/vrcore.h` is made in `host/app/plugin.h` and `tools/vr_plugin_test.c` at the same
   time, and every game is rebuilt. Bump `VR_ABI_VERSION` only when an existing call or float offset changes. A new
   optional export needs no bump.
-- **Every game is a user.** Try a change against each game that pins vrcore (`VRCORE_DIR=<working clone>`) before
-  pushing it, then move each game's pin when that game is ready.
+- **Every game is a user.** Try a change against each game (they build against the working clone, or `VRCORE_DIR=<folder>`) before
+  pushing it, and rebuild each game after.

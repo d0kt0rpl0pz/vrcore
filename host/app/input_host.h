@@ -21,6 +21,9 @@ struct HapticSink {
 };
 void input_set_haptics(const HapticSink &s);
 
+// xr/xr_actions.cpp: the profile now in force on a hand, without "/interaction_profiles/" ("" none).
+void input_set_profile(int hand, const char *profile);
+
 // pads.cpp: SDL gamepads in and out (both hosts), and the keyboard.
 void pads_init();                                   // after SDL_Init (SDL_INIT_GAMEPAD)
 void pads_event(const void *sdl_event);             // every SDL event the host pumps (added / removed, keys)

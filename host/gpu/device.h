@@ -47,6 +47,7 @@ struct Device {
     bool portability = false;                // VK_KHR_portability_subset enabled (MoltenVK)
     bool clip_distance = false;              // shaderClipDistance enabled
     bool gather_extended = false;            // shaderImageGatherExtended enabled
+    bool astc_ldr = false;                   // textureCompressionASTC_LDR enabled
 };
 
 // The API version the host asks for (and OpenXR's requirements are checked against).

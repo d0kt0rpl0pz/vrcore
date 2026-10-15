@@ -212,14 +212,15 @@ bool instance_create(Host &h)
     h.ext.convert_timespec = optional(XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME);
     h.ext.touch_plus = optional(XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME);
     h.ext.frame_controller = optional("XR_VALVE_frame_controller_interaction");
+    h.ext.pico = optional("XR_BD_controller_interaction");
     h.ext.layer_settings = optional(XR_FB_COMPOSITION_LAYER_SETTINGS_EXTENSION_NAME);
     h.ext.fb_passthrough = optional(XR_FB_PASSTHROUGH_EXTENSION_NAME);     // logged with the blend modes
     log("openxr: optional: refresh rate %d, foveation %d (update state %d, foveation %d, configuration %d, "
         "vulkan %d), performance settings %d, thread settings %d, timespec %d, touch plus %d, frame controller %d, "
-        "layer settings %d",
+        "pico controllers %d, layer settings %d",
         h.ext.refresh_rate, h.ext.foveation, update_state, fov, fov_config, fov_vulkan, h.ext.perf_settings,
         h.ext.thread_settings, h.ext.convert_timespec, h.ext.touch_plus, h.ext.frame_controller,
-        h.ext.layer_settings);
+        h.ext.pico, h.ext.layer_settings);
 
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     JavaVM *vm = nullptr;

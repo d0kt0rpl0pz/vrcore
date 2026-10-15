@@ -2,16 +2,23 @@
  * controllers.h -- the controllers and the pointing ray, drawn while a menu is up (ui/menu.h), on the overlay layer
  * (app/layers.h) so they stand in front of the panel and the boxes, which are quad layers.
  *
- * THE MODELS: assets/controller_left.glb and controller_right.glb, the generic trigger / squeeze / thumbstick
- * controller of immersive-web/webxr-input-profiles (MIT: THIRD_PARTY.md), loaded with cgltf as the wheel is. Their
+ * THE MODELS: one set a hand, picked by the interaction profile the runtime reports for it (set_profile; the table
+ * is in controllers.cpp): Touch, Touch Plus, Index, Vive, Pico 4 and Neo 3 models under assets/controllers/, and the
+ * generic trigger / squeeze / thumbstick pair (assets/controller_{left,right}.glb) for any other profile and before
+ * one is known, all of immersive-web/webxr-input-profiles (MIT: THIRD_PARTY.md), loaded with cgltf as the wheel
+ * is. A changed profile frees the old model after a few ticks (frames in flight may still read it). Their
  * origin is the grip pose (-z forward, y up, metres), so a hand is drawn at its grip as it is. Every node's mesh is
  * baked into one static pose (no button animation); a left-handed (mirrored) node turns its triangles round. Lit
- * with the scene shader's one directional light, in the material's base colour (its textures are not used).
+ * with the scene shader's one directional light, in the material's base colour factor, times the base colour
+ * texture where the material has one. A texture is a KTX2 file (ASTC, gpu/ktx2.h) that the glTF image's `uri`
+ * names, beside the GLB (assets/controllers/); it is sampled repeating, since Index's UVs run outside 0..1. No
+ * ASTC on the device, or a file that does not load: the part is drawn in its factor alone.
  * THE RAY: a thin white box from the aim along -z, yellow over something clickable.
  */
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "app/input.h"
@@ -34,6 +41,10 @@ public:
     };
 
     bool init(gpu::Renderer &r);                    // false (logged): nothing to draw, the menu carries on
+    // The profile now on a hand ("oculus/touch_controller"; "" none): its model loaded in place of the last,
+    // which is retired. The same profile again does nothing. Logged.
+    void set_profile(gpu::Renderer &r, int hand, const char *profile);
+    void tick(gpu::Renderer &r);                    // once a frame: retired models past their wait are freed
     void shutdown(gpu::Renderer &r);
     bool ready() const { return pipe_ != nullptr; }
     // In the overlay's pass: `hands` indexed by Input::kLeft / kRight.
@@ -43,17 +54,33 @@ private:
     struct Part {
         uint32_t first = 0, count = 0;
         float color[4] = {0.5f, 0.5f, 0.5f, 1};
+        int texture = -1;                           // into Model::textures; -1 the factor alone
     };
     struct Model {
         gpu::Buffer *vertices = nullptr, *indices = nullptr;
         std::vector<Part> parts;
+        std::vector<gpu::Texture *> textures;       // one a distinct image uri
     };
+    struct Retired {
+        Model model;
+        int ticks;
+    };
+    static constexpr int kRetireTicks = 8;
     bool load(gpu::Renderer &r, const char *file, Model &m);
+    static void destroy_model(gpu::Renderer &r, Model &m);
 
     Model models_[2];
+    std::string profile_[2];
+    bool loaded_[2] = {false, false};
+    std::vector<Retired> retired_;
     gpu::Buffer *cube_ = nullptr;
     uint32_t cube_count_ = 0;
-    gpu::Pipeline *pipe_ = nullptr;
+    gpu::Pipeline *pipe_ = nullptr, *pipe_tex_ = nullptr;
 };
+
+// The families the table knows, for the sim's key that cycles them (host/sim): `i` in [0, count) is a profile string
+// ("oculus/touch_controller"), the last one "" (the generic pair).
+int controller_family_count();
+const char *controller_family_profile(int i);
 
 }

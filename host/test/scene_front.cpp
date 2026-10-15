@@ -14,12 +14,20 @@
  * checker over a half-transparent green, straight alpha. On the headset the compositor draws it; in the sim a
  * quad over everything.
  *
+ * And KTX2 (gpu/ktx2.h), in a row of quads under the panel: a 16 x 16 ASTC 4x4 sRGB texture with its five mip
+ * levels, built in memory as a KTX2 file and read back by the reader, one quad a level (the shader's lod): level 0
+ * is a 4 x 4 checker of green and blue with a red block at the top left (so the picture's orientation shows), the
+ * levels after it checkers of their own colour, each half as many blocks. Then a 10 x 10 ASTC 6x6 linear texture
+ * with two levels (partial blocks at the edge), a yellow and a cyan checker, at the end of the row. Where the
+ * device has no ASTC the row is not drawn and the log says so.
+ *
  * And the menu (ui/menu.h; Esc, Start or the left menu button) with the overlay (app/layers.h): while it is up, a
  * yellow cube 10 cm across turns 0.5 m ahead of where the head was as it opened, between the eyes and the panel
  * (1.1 m), drawn on the overlay with the scene's own lit pipeline. It must stand in front of the panel's text: in
  * the eye pass the panel's quad layer would cover it. The menu's row turns it off, to compare. --menu opens the
  * menu at the start (a headless --shot of it).
  */
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -29,6 +37,7 @@
 #include "../app/layers.h"
 #include "../app/log.h"
 #include "../app/input.h"
+#include "../gpu/ktx2.h"
 #include "../gpu/render.h"
 #include "../ui/menu.h"
 
@@ -66,6 +75,7 @@ struct PanelVertex {
 struct PanelPush {
     float color[4];
     float textured;
+    float lod;                              // below 0: the level the screen picks
 };
 
 struct Vertex {
@@ -92,6 +102,10 @@ struct Scene {
     const gpu::Texture *target_tex = nullptr;
     gpu::DynamicBuffer *panel = nullptr;
     gpu::Pipeline *offscreen = nullptr, *panel_pipe = nullptr, *tint = nullptr;
+    // KTX2: the row of quads, their two ASTC textures and the pipeline (no stencil, so the panel's tint leaves them)
+    gpu::Texture *ktx_4x4 = nullptr, *ktx_6x6 = nullptr;
+    gpu::Buffer *ktx_quads = nullptr;
+    gpu::Pipeline *ktx_pipe = nullptr;
     Layer *layer = nullptr;
     // the menu and the overlay's test cube
     ui::Menu menu;
@@ -103,6 +117,7 @@ struct Scene {
 } scene;
 
 constexpr float kCubeAhead = 0.5f, kCubeSize = 0.1f;
+constexpr uint32_t kKtxQuads = 7;
 
 void menu_build()
 {
@@ -165,6 +180,118 @@ void cube_overlay_draw(gpu::Frame &f)
     f.draw(scene.cube_count);
 }
 
+void panel_quad(PanelVertex *v, float cx, float cy, float z, float half)
+{
+    const float c[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    const int order[6] = {0, 1, 2, 0, 2, 3};
+    for (int i = 0; i < 6; ++i) {
+        const float *k = c[order[i]];
+        v[i] = {{cx + k[0] * half, cy + k[1] * half, z}, {0.5f + 0.5f * k[0], 0.5f - 0.5f * k[1]}};
+    }
+}
+
+// A KTX2 file of ASTC void-extent blocks (one colour a block: a test needs no encoder). `colour(level, bx, by,
+// rgba)` gives each block's colour as four 16-bit values. Written as toktx does: the level index in order, the
+// levels smallest first, each on a 16-byte boundary; no data descriptor or key/value data.
+template <typename F>
+std::vector<uint8_t> ktx2_file(uint32_t vk_format, uint32_t block, uint32_t width, uint32_t height, uint32_t levels,
+                               F colour)
+{
+    std::vector<uint8_t> file(80 + 24 * levels, 0);
+    auto put32 = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) file[at + i] = uint8_t(v >> (8 * i));
+    };
+    auto put64 = [&](size_t at, uint64_t v) {
+        for (int i = 0; i < 8; ++i) file[at + i] = uint8_t(v >> (8 * i));
+    };
+    static const uint8_t id[12] = {0xAB, 'K', 'T', 'X', ' ', '2', '0', 0xBB, '\r', '\n', 0x1A, '\n'};
+    std::copy(id, id + 12, file.begin());
+    put32(12, vk_format);
+    put32(16, 1);                                           // typeSize
+    put32(20, width);
+    put32(24, height);
+    put32(36, 1);                                           // faceCount
+    put32(40, levels);
+
+    for (uint32_t l = levels; l-- > 0;) {                   // smallest first
+        uint32_t w = std::max(width >> l, 1u), h = std::max(height >> l, 1u);
+        uint32_t bx = (w + block - 1) / block, by = (h + block - 1) / block;
+        file.resize((file.size() + 15) & ~size_t(15), 0);
+        size_t at = file.size();
+        put64(80 + 24 * l, at);
+        put64(80 + 24 * l + 8, 16ull * bx * by);
+        put64(80 + 24 * l + 16, 16ull * bx * by);
+        file.resize(at + 16 * size_t(bx) * by, 0);
+        for (uint32_t y = 0; y < by; ++y)
+            for (uint32_t x = 0; x < bx; ++x) {
+                uint16_t rgba[4];
+                colour(l, x, y, rgba);
+                uint8_t *b = &file[at + 16 * (size_t(y) * bx + x)];
+                static const uint8_t head[8] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+                std::copy(head, head + 8, b);               // a void-extent block, LDR, no extent
+                for (int c = 0; c < 4; ++c) {
+                    b[8 + 2 * c] = uint8_t(rgba[c]);
+                    b[9 + 2 * c] = uint8_t(rgba[c] >> 8);
+                }
+            }
+    }
+    return file;
+}
+
+bool ktx_init(gpu::Renderer &r)
+{
+    if (!r.astc()) {
+        log("scene: no ASTC on this device; the KTX2 row is not drawn");
+        return true;
+    }
+    // 4x4 sRGB, 16 x 16, 5 levels: level 0 green / blue with a red corner, then a colour a level
+    static const uint16_t tint[5][3] = {{0, 0xc000, 0}, {0xffff, 0xc000, 0}, {0xffff, 0, 0xffff},
+                                        {0xffff, 0xffff, 0}, {0xffff, 0xffff, 0xffff}};
+    auto four = [](uint32_t l, uint32_t x, uint32_t y, uint16_t rgba[4]) {
+        bool odd = (x + y) & 1;
+        rgba[3] = 0xffff;
+        if (l == 0 && !x && !y) {
+            rgba[0] = 0xffff, rgba[1] = rgba[2] = 0;
+        } else if (l == 0) {
+            rgba[0] = 0, rgba[1] = odd ? 0 : 0xc000, rgba[2] = odd ? 0xc000 : 0;
+        } else {
+            for (int c = 0; c < 3; ++c) rgba[c] = odd ? tint[l][c] / 3 : tint[l][c];
+        }
+    };
+    std::vector<uint8_t> a = ktx2_file(158, 4, 16, 16, 5, four);        // VK_FORMAT_ASTC_4x4_SRGB_BLOCK
+    scene.ktx_4x4 = gpu::ktx2_create_texture(r, a.data(), a.size(), gpu::Filter::Linear, gpu::Address::Clamp, "scene");
+
+    // 6x6 linear, 10 x 10: 2 x 2 blocks, the right and bottom ones partial; level 1 (5 x 5) is one block
+    auto six = [](uint32_t l, uint32_t x, uint32_t y, uint16_t rgba[4]) {
+        bool odd = (x + y) & 1;
+        rgba[0] = odd ? 0xffff : 0;
+        rgba[1] = 0xffff;
+        rgba[2] = odd ? 0 : 0xffff;
+        rgba[3] = 0xffff;
+        if (l) rgba[0] = rgba[1] = rgba[2] = 0x8000;
+    };
+    std::vector<uint8_t> b = ktx2_file(165, 6, 10, 10, 2, six);         // VK_FORMAT_ASTC_6x6_UNORM_BLOCK
+    scene.ktx_6x6 = gpu::ktx2_create_texture(r, b.data(), b.size(), gpu::Filter::Nearest, gpu::Address::Clamp, "scene");
+
+    // seven quads 14 cm across, 18 cm apart, under the panel (which bobs 0.1 m about y = 0.3, z = -2): the five
+    // levels of the 4x4 texture, then the two of the 6x6
+    std::vector<PanelVertex> v(6 * kKtxQuads);
+    for (uint32_t i = 0; i < kKtxQuads; ++i)
+        panel_quad(&v[6 * i], -0.54f + 0.18f * i, kFloorY + 1.6f - 0.6f, -2.f, 0.07f);
+    scene.ktx_quads = r.create_buffer(gpu::BufferUsage::Vertex, v.size() * sizeof(PanelVertex), v.data());
+
+    static const gpu::VertexAttr attrs[2] = {{0, 0, gpu::Format::Float3}, {1, 12, gpu::Format::Float2}};
+    gpu::PipelineDesc p;
+    p.vert = {kPanelVert, sizeof kPanelVert};
+    p.frag = {kPanelFrag, sizeof kPanelFrag};
+    p.stride = sizeof(PanelVertex);
+    p.attrs = attrs;
+    p.attr_count = 2;
+    p.cull = gpu::Cull::None;
+    scene.ktx_pipe = r.create_pipeline(p);
+    return scene.ktx_4x4 && scene.ktx_6x6 && scene.ktx_quads && scene.ktx_pipe;
+}
+
 bool panel_init(gpu::Renderer &r)
 {
     const uint8_t checker[16] = {255, 0, 255, 0, 0, 255, 0, 255, 255, 0, 255, 0, 0, 255, 0, 255};
@@ -202,17 +329,7 @@ bool panel_init(gpu::Renderer &r)
     scene.tint = r.create_pipeline(p);
     scene.layer = layer_create(r, {512, 256, false});
     return scene.checker && scene.target && scene.panel && scene.offscreen && scene.panel_pipe && scene.tint &&
-           scene.layer;
-}
-
-void panel_quad(PanelVertex *v, float cx, float cy, float z, float half)
-{
-    const float c[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
-    const int order[6] = {0, 1, 2, 0, 2, 3};
-    for (int i = 0; i < 6; ++i) {
-        const float *k = c[order[i]];
-        v[i] = {{cx + k[0] * half, cy + k[1] * half, z}, {0.5f + 0.5f * k[0], 0.5f - 0.5f * k[1]}};
-    }
+           scene.layer && ktx_init(r);
 }
 
 void scene_prepare(gpu::Frame &f)
@@ -255,13 +372,24 @@ void panel_draw(gpu::Frame &f)
     f.bind(scene.panel_pipe);
     f.bind_vertices(scene.panel);
     f.bind_textures(&t, 1);
-    PanelPush p = {{1, 1, 1, 1}, 1.f};
+    PanelPush p = {{1, 1, 1, 1}, 1.f, -1.f};
     f.push(&p, sizeof p);
     f.draw(6);
     f.bind(scene.tint);
-    p = {{1, 0, 0, 0.35f}, 0.f};
+    p = {{1, 0, 0, 0.35f}, 0.f, -1.f};
     f.push(&p, sizeof p);
     f.draw(6, 6);
+
+    if (!scene.ktx_pipe) return;
+    f.bind(scene.ktx_pipe);
+    f.bind_vertices(scene.ktx_quads);
+    for (uint32_t i = 0; i < kKtxQuads; ++i) {
+        const gpu::Texture *t = i < 5 ? scene.ktx_4x4 : scene.ktx_6x6;
+        f.bind_textures(&t, 1);
+        p = {{1, 1, 1, 1}, 1.f, i < 5 ? float(i) : float(i - 5)};
+        f.push(&p, sizeof p);
+        f.draw(6, 6 * i);
+    }
 }
 
 void quad(std::vector<Vertex> &v, const float a[3], const float b[3], const float c[3], const float d[3],
@@ -394,6 +522,10 @@ void scene_shutdown(gpu::Renderer &r)
     r.destroy_pipeline(scene.panel_pipe);
     r.destroy_pipeline(scene.tint);
     r.destroy_texture(scene.checker);
+    r.destroy_texture(scene.ktx_4x4);
+    r.destroy_texture(scene.ktx_6x6);
+    r.destroy_buffer(scene.ktx_quads);
+    r.destroy_pipeline(scene.ktx_pipe);
     r.destroy_target(scene.target);
     r.destroy_dynamic_buffer(scene.panel);
     layer_destroy(r, scene.layer);

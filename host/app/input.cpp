@@ -5,6 +5,8 @@
 
 #include <cmath>
 
+#include <SDL3/SDL.h>
+
 namespace vrcore {
 
 namespace {
@@ -12,6 +14,7 @@ namespace {
 Input g_input;
 HapticSink g_haptics;
 double g_last = -1;
+char g_profile[2][64];
 
 // LAST DEVICE (input.h): what each hand was doing last frame, and the place its movement is counted from.
 constexpr float kMoveInput = 0.02f;         // metres a hand moves before that is input
@@ -84,6 +87,14 @@ void input_begin_frame(double now_s)
 }
 
 void input_set_haptics(const HapticSink &s) { g_haptics = s; }
+
+void input_set_profile(int hand, const char *profile)
+{
+    if (hand < 0 || hand > 1) return;
+    SDL_strlcpy(g_profile[hand], profile ? profile : "", sizeof g_profile[hand]);
+}
+
+const char *controller_profile(int hand) { return hand == 0 || hand == 1 ? g_profile[hand] : ""; }
 
 void haptic(int hand, float amplitude, float seconds)
 {

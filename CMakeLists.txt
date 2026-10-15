@@ -146,6 +146,7 @@ add_library(vrcore_host STATIC
     host/rig/cgltf_impl.cpp
     host/gpu/device.cpp
     host/gpu/eye_target.cpp
+    host/gpu/ktx2.cpp
     host/gpu/render.cpp
     host/gpu/vk_impl.cpp
     host/ui/controllers.cpp
@@ -190,6 +191,8 @@ vrcore_add_shaders(vrcore_host imgui.frag ${VRCORE_SHADER_DIR}/imgui.frag)
 # the controllers and the ray (ui/controllers): the test scene's lit shader, a model and a colour a draw
 vrcore_add_shaders(vrcore_host controller.vert ${VRCORE_SHADER_DIR}/scene.vert)
 vrcore_add_shaders(vrcore_host controller.frag ${VRCORE_SHADER_DIR}/scene.frag)
+vrcore_add_shaders(vrcore_host controller_tex.vert ${VRCORE_SHADER_DIR}/scene.vert DEFINES TEXTURED)
+vrcore_add_shaders(vrcore_host controller_tex.frag ${VRCORE_SHADER_DIR}/scene.frag DEFINES TEXTURED)
 # the hand wheel (rig/wheel_model): its shaders on both hosts; its model from assets/ (the APK's assets on Android),
 # as are the controllers' (ui/controllers)
 vrcore_add_shaders(vrcore_host wheel.vert ${VRCORE_SHADER_DIR}/wheel.vert)

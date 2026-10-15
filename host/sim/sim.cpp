@@ -19,7 +19,13 @@
  * point under the mouse, taken on the plane 1.1 m ahead of that eye (the menu's distance); the left button is its
  * trigger. Any key press is a pad or key input and hides the controllers (the menu's rule): P does nothing else
  * here, so it is the key to press for that; moving the mouse brings the controller back. The left hand reads
- * inactive. Headless, no hands.
+ * inactive. Headless, no hands, unless VR_SIM_PROFILE is set (below).
+ *
+ * THE CONTROLLER MODELS. The sim reports no interaction profile, so the generic pair is drawn. F5 / F6 step the
+ * family shown on the left / right hand through the table in ui/controllers.cpp (each press logs the profile; only
+ * the right hand is ever drawn here, the left model still loads). The press is a key input, so the controller hides
+ * until the mouse moves. VR_SIM_PROFILE=<profile string> sets both hands from the start, and a headless --shot
+ * then draws the fake right hand, to compare the models offline.
  */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -46,6 +52,7 @@
 #include "../gpu/render.h"
 #include "../gpu/render_host.h"
 #include "../gpu/vk.h"
+#include "../ui/controllers.h"
 #include "sim_layers.h"
 
 namespace vrcore::sim {
@@ -59,6 +66,8 @@ constexpr float kIpd = 0.063f;                // the headset logged 0.0648 at it
 constexpr float kMoveSpeed = 1.5f;       // m/s
 constexpr float kLookRate = 1.5f;        // rad/s on the arrow keys
 constexpr float kMouseSens = 0.0025f;    // rad per pixel
+bool g_sim_profile = false;                         // VR_SIM_PROFILE is set: a headless run draws the fake hand too
+
 // the fake right controller (THE FAKE CONTROLLER): its place in the head's yaw frame, how far the mouse moves it
 constexpr float kHandRight = 0.25f, kHandDown = -0.30f, kHandAhead = 0.30f, kHandSway = 0.10f;
 constexpr float kAimPlane = 1.1f;        // the aim's depth in front of the eye
@@ -228,6 +237,7 @@ struct Sim {
     bool quit = false;
     int64_t period_ns = 0;                          // the display's (windowed) or --hz's (headless)
     uint32_t recentres = 0;                         // R presses: the headset's recentre
+    int family[2] = {-1, -1};                       // F5 / F6: the controller family shown on each hand (-1 none yet)
     bool left_pressed = false;                      // the left button went down since the last update (Input::mouse)
     float aim_dir[3] = {0, 0, -1};                  // the fake controller's aim, kept while the mouse is off the picture
 
@@ -572,7 +582,14 @@ void Sim::poll(float dt)
         case SDL_EVENT_KEY_DOWN:
             if (ev.key.repeat) break;
             if (ev.key.key == SDLK_TAB) side_by_side = !side_by_side;   // Esc is the front's (the menu): close the window to quit
-            else if (ev.key.key == SDLK_R) {
+            else if (ev.key.key == SDLK_F5 || ev.key.key == SDLK_F6) {
+                // the sim reports no interaction profile; this feeds one per hand so every model can be seen
+                const int h = ev.key.key == SDLK_F5 ? 0 : 1;
+                family[h] = (family[h] + 1) % ui::controller_family_count();
+                const char *p = ui::controller_family_profile(family[h]);
+                input_set_profile(h, p);
+                log("sim: %s hand profile \"%s\"", h ? "right" : "left", p);
+            } else if (ev.key.key == SDLK_R) {
                 head = Head();
                 ++recentres;
             }
@@ -660,7 +677,7 @@ void Sim::fill_mouse(Mouse &m)
 // THE FAKE CONTROLLER: the right hand, from the mouse (the file's head comment).
 void Sim::fill_controller(Input &in)
 {
-    if (!window) return;
+    if (!window && !g_sim_profile) return;              // headless has no hands, but for a VR_SIM_PROFILE shot
     Hand &hd = in.hands[Input::kRight];
     const Mouse &m = in.mouse;
     float s = std::sin(head.yaw), c = std::cos(head.yaw);
@@ -1205,6 +1222,13 @@ int run(const AppInfo &info, const Options &launch)
 {
     Options o = launch;                             // the graphics in force change while it runs
     pads_init();
+    // VR_SIM_PROFILE=<profile string> gives both hands that profile from the start (a --shot has no key to press)
+    if (const char *p = SDL_getenv("VR_SIM_PROFILE")) {
+        input_set_profile(0, p);
+        input_set_profile(1, p);
+        g_sim_profile = true;
+        log("sim: both hands profile \"%s\" (VR_SIM_PROFILE)", p);
+    }
     Sim s;
     int rc = s.run(info, o);
     pads_shutdown();

@@ -32,13 +32,67 @@ VkFormat vk_format(TextureFormat f)
     case TextureFormat::R8: return VK_FORMAT_R8_UNORM;
     case TextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
     case TextureFormat::RGBA8_sRGB: return VK_FORMAT_R8G8B8A8_SRGB;
+    case TextureFormat::ASTC_4x4: return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
+    case TextureFormat::ASTC_4x4_sRGB: return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
+    case TextureFormat::ASTC_6x6: return VK_FORMAT_ASTC_6x6_UNORM_BLOCK;
+    case TextureFormat::ASTC_6x6_sRGB: return VK_FORMAT_ASTC_6x6_SRGB_BLOCK;
     }
     return VK_FORMAT_UNDEFINED;
 }
 
-uint32_t texel_bytes(TextureFormat f)
+bool is_astc(TextureFormat f)
 {
-    return f == TextureFormat::R8 ? 1 : 4;
+    return f >= TextureFormat::ASTC_4x4;
+}
+
+// What a target or an offscreen pipeline can be.
+bool renderable(TextureFormat f)
+{
+    return f == TextureFormat::RGBA8 || f == TextureFormat::RGBA8_sRGB;
+}
+
+// A texel block's size in texels and its bytes (1 x 1 for the uncompressed formats).
+struct Block {
+    uint32_t w, h, bytes;
+};
+
+Block block_of(TextureFormat f)
+{
+    switch (f) {
+    case TextureFormat::R8: return {1, 1, 1};
+    case TextureFormat::RGBA8:
+    case TextureFormat::RGBA8_sRGB: return {1, 1, 4};
+    case TextureFormat::ASTC_4x4:
+    case TextureFormat::ASTC_4x4_sRGB: return {4, 4, 16};
+    case TextureFormat::ASTC_6x6:
+    case TextureFormat::ASTC_6x6_sRGB: return {6, 6, 16};
+    }
+    return {1, 1, 4};
+}
+
+uint32_t level_extent(uint32_t size, uint32_t level)
+{
+    return std::max(size >> level, 1u);
+}
+
+size_t level_bytes(const TextureDesc &d, uint32_t level)
+{
+    Block b = block_of(d.format);
+    size_t bx = (level_extent(d.width, level) + b.w - 1) / b.w;
+    size_t by = (level_extent(d.height, level) + b.h - 1) / b.h;
+    return bx * by * b.bytes;
+}
+
+// `bytes` of the texture's contents set to black: zeros, or for ASTC the void-extent block of opaque black.
+void fill_black(void *dst, size_t bytes, TextureFormat f)
+{
+    if (!is_astc(f)) {
+        std::memset(dst, 0, bytes);
+        return;
+    }
+    static const uint8_t kBlack[16] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                       0,    0,    0,    0,    0,    0,    0xff, 0xff};
+    for (size_t o = 0; o + 16 <= bytes; o += 16) std::memcpy((char *)dst + o, kBlack, 16);
 }
 
 VkCompareOp vk_compare(Compare c)
@@ -101,7 +155,7 @@ void free_buffer(Device &dev, Buffer &b)
     b = Buffer();
 }
 
-void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to,
+void image_barrier(VkCommandBuffer cmd, VkImage image, uint32_t levels, VkImageLayout from, VkImageLayout to,
                    VkPipelineStageFlags src_stage, VkAccessFlags src_access, VkPipelineStageFlags dst_stage,
                    VkAccessFlags dst_access)
 {
@@ -112,24 +166,28 @@ void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkIma
     b.newLayout = to;
     b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.image = image;
-    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
     vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 }
 
 constexpr VkPipelineStageFlags kShaderStages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
-// Records `t`'s contents from `staging` at `offset`: the image from (`from`) to TRANSFER_DST, the copy, back to
-// SHADER_READ_ONLY for the shaders after it. An earlier frame's reads are ordered before the copy (queue order).
+// Records `t`'s contents (every mip level, texture_level_offset apart) from `staging` at `offset`: the image
+// from (`from`) to TRANSFER_DST, the copies, back to SHADER_READ_ONLY for the shaders after it. An earlier
+// frame's reads are ordered before the copy (queue order).
 void record_copy(VkCommandBuffer cmd, Texture &t, VkBuffer staging, VkDeviceSize offset, VkImageLayout from)
 {
-    image_barrier(cmd, t.image, from, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kShaderStages, 0,
+    uint32_t levels = t.desc.mips;                      // cut to the chain when the texture was made
+    image_barrier(cmd, t.image, levels, from, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kShaderStages, 0,
                   VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy copy = {};
-    copy.bufferOffset = offset;
-    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    copy.imageExtent = {t.desc.width, t.desc.height, 1};
-    vkCmdCopyBufferToImage(cmd, staging, t.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    image_barrier(cmd, t.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    VkBufferImageCopy copies[kMaxMips] = {};
+    for (uint32_t i = 0; i < levels; ++i) {
+        copies[i].bufferOffset = offset + texture_level_offset(t.desc, i);
+        copies[i].imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1};
+        copies[i].imageExtent = {level_extent(t.desc.width, i), level_extent(t.desc.height, i), 1};
+    }
+    vkCmdCopyBufferToImage(cmd, staging, t.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, levels, copies);
+    image_barrier(cmd, t.image, levels, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, kShaderStages,
                   VK_ACCESS_SHADER_READ_BIT);
 }
@@ -138,12 +196,13 @@ void record_copy(VkCommandBuffer cmd, Texture &t, VkBuffer staging, VkDeviceSize
 bool make_texture(Device &dev, Texture &t, const TextureDesc &desc, VkImageUsageFlags usage)
 {
     t.desc = desc;
+    t.desc.mips = texture_mip_count(desc);
     t.format = vk_format(desc.format);
     VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ici.imageType = VK_IMAGE_TYPE_2D;
     ici.format = t.format;
     ici.extent = {desc.width, desc.height, 1};
-    ici.mipLevels = 1;
+    ici.mipLevels = t.desc.mips;
     ici.arrayLayers = 1;
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -157,16 +216,16 @@ bool make_texture(Device &dev, Texture &t, const TextureDesc &desc, VkImageUsage
     vci.image = t.image;
     vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vci.format = t.format;
-    vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, t.desc.mips, 0, 1};
     VRCORE_VK(vkCreateImageView(dev.device, &vci, nullptr, &t.view), false);
 
     VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     sci.magFilter = sci.minFilter = desc.filter == Filter::Linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-    sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sci.mipmapMode = desc.filter == Filter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     sci.addressModeU = desc.address != Address::Clamp ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.addressModeV = sci.addressModeW =
         desc.address == Address::Repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sci.maxLod = 0.f;
+    sci.maxLod = float(t.desc.mips - 1);
     VRCORE_VK(vkCreateSampler(dev.device, &sci, nullptr, &t.sampler), false);
     return true;
 }
@@ -179,14 +238,14 @@ void free_texture(Device &dev, Texture &t)
     t = Texture();
 }
 
-// A texture's contents through a one-off command buffer and a staging buffer (null data: zeros), waited for.
+// A texture's contents through a one-off command buffer and a staging buffer (null data: black), waited for.
 bool upload_once(Device &dev, Texture &t, const void *data, VkImageLayout from)
 {
-    size_t bytes = size_t(t.desc.width) * t.desc.height * texel_bytes(t.desc.format);
+    size_t bytes = texture_bytes(t.desc);
     Buffer staging;
     if (!make_buffer(dev, staging, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, bytes)) return false;
     if (data) std::memcpy(staging.mapped, data, bytes);
-    else std::memset(staging.mapped, 0, bytes);
+    else fill_black(staging.mapped, bytes, t.desc.format);
     VkCommandBuffer cmd = device_begin_once(dev);
     bool ok = cmd != VK_NULL_HANDLE;
     if (ok) {
@@ -225,6 +284,26 @@ void write_uniform_set(VkDevice device, VkDescriptorSet set, VkBuffer buffer, si
     vkUpdateDescriptorSets(device, 1, &w, 0, nullptr);
 }
 
+}
+
+uint32_t texture_mip_count(const TextureDesc &d)
+{
+    uint32_t chain = 1;
+    for (uint32_t m = std::max(d.width, d.height); m > 1; m >>= 1) ++chain;
+    return std::min({std::max(d.mips, 1u), chain, kMaxMips});
+}
+
+size_t texture_level_offset(const TextureDesc &d, uint32_t level)
+{
+    size_t offset = 0;
+    for (uint32_t i = 0; i < level; ++i) offset = (offset + level_bytes(d, i) + 3) & ~size_t(3);
+    return offset;
+}
+
+size_t texture_bytes(const TextureDesc &d)
+{
+    uint32_t last = texture_mip_count(d) - 1;
+    return texture_level_offset(d, last) + level_bytes(d, last);
 }
 
 const RendererImpl::OffscreenPasses *renderer_offscreen_passes(RendererImpl &r, VkFormat format, VkImageLayout rest)
@@ -530,7 +609,7 @@ void Frame::upload(Texture *t, const void *data)
         return;
     }
     RendererImpl::Slot &s = r.slots[r.slot];
-    size_t bytes = size_t(t->desc.width) * t->desc.height * texel_bytes(t->desc.format);
+    size_t bytes = texture_bytes(t->desc);
     size_t offset = (s.staging_used + 15) & ~size_t(15);
     if (offset + bytes > s.staging.bytes) {
         // Grown: the copies this frame already recorded read the old buffer, which is retired until the slot
@@ -733,6 +812,11 @@ void Renderer::destroy_dynamic_buffer(DynamicBuffer *b)
 
 Texture *Renderer::create_texture(const TextureDesc &desc, const void *data)
 {
+    if (is_astc(desc.format) && !impl->dev->astc_ldr) {
+        log("render: a %ux%u ASTC texture, and this device has no textureCompressionASTC_LDR; none made",
+            desc.width, desc.height);
+        return nullptr;
+    }
     Texture *t = new Texture;
     if (!desc.width || !desc.height || !make_texture(*impl->dev, *t, desc, VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
         !upload_once(*impl->dev, *t, data, VK_IMAGE_LAYOUT_UNDEFINED)) {
@@ -762,7 +846,7 @@ Target *Renderer::create_target(uint32_t width, uint32_t height, TextureFormat f
     Target *t = new Target;
     TextureDesc desc = {width, height, format, filter, Address::Clamp};
     const RendererImpl::OffscreenPasses *passes =
-        format == TextureFormat::R8 ? nullptr : renderer_offscreen_passes(*impl, vk_format(format));
+        !renderable(format) ? nullptr : renderer_offscreen_passes(*impl, vk_format(format));
     bool ok = passes && make_texture(dev, t->tex, desc,
                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                          VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -848,7 +932,7 @@ Pipeline *Renderer::create_pipeline(const PipelineDesc &d)
     VkRenderPass pass = VK_NULL_HANDLE;
     if (eye) {
         pass = impl->target->pass;
-    } else if (d.offscreen_format != TextureFormat::R8) {
+    } else if (renderable(d.offscreen_format)) {
         const RendererImpl::OffscreenPasses *p = renderer_offscreen_passes(*impl, vk_format(d.offscreen_format));
         if (p) pass = p->clear;
     }
@@ -980,6 +1064,11 @@ void Renderer::destroy_pipeline(Pipeline *p)
 bool Renderer::fdm() const
 {
     return impl->target->fdm;
+}
+
+bool Renderer::astc() const
+{
+    return impl->dev->astc_ldr;
 }
 
 }

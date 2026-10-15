@@ -309,6 +309,7 @@ private:
     std::vector<Drawn> box_layers_;
     std::vector<Box> boxes_;
     class ImguiRender *render_ = nullptr;
+    gpu::Renderer *gpu_ = nullptr;          // init's, for the controller models a profile change loads
     const Legend *legend_shown_ = nullptr;
 };
 

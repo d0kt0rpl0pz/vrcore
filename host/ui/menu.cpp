@@ -144,6 +144,7 @@ bool Menu::init(gpu::Renderer &r, const Hooks &hooks, std::vector<Box> boxes)
     box_layers_.resize(boxes_.size());
     for (size_t i = 0; i < boxes_.size(); ++i)
         ok &= make(box_layers_[i], boxes_[i].max_width, boxes_[i].max_height, kCanvas * (3 + i), boxes_[i].left);
+    gpu_ = &r;
     models_.init(r);                        // not fatal: the menu works with no controllers drawn
     log("ui: menu %s, %.0f px a metre, layers %s", ok ? "ready" : "NOT ready", kPxPerM, ok ? "made" : "missing");
     return ok;
@@ -156,6 +157,7 @@ void Menu::shutdown(gpu::Renderer &r)
     layer_destroy(r, note_.layer);
     for (Drawn &d : box_layers_) layer_destroy(r, d.layer);
     models_.shutdown(r);
+    gpu_ = nullptr;
     box_layers_.clear();
     panel_ = legend_ = note_ = Drawn();
     if (render_) {
@@ -981,6 +983,11 @@ void Menu::point(const Input &in, bool &click)
 
 void Menu::prepare(gpu::Frame &f)
 {
+    // the model each hand's profile calls for (input.h: "" in the sim, so the generic pair there)
+    if (gpu_ && models_.ready()) {
+        for (int h = 0; h < 2; ++h) models_.set_profile(*gpu_, h, controller_profile(h));
+        models_.tick(*gpu_);
+    }
     bool up = (open_ || showing_message_) && ctx_ && render_ && panel_.layer;
     auto hide = [](Drawn &d) {
         static const float kNowhere[3] = {0, 0, 0};

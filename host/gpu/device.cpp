@@ -139,12 +139,16 @@ bool device_create(Device &dev, const DeviceHooks &hooks, const char *app_name)
     VkPhysicalDeviceFeatures2 on = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     on.pNext = &mv_on;
     // Core features a front's shaders may use, where offered: clip distances (a vertex dropped by its
-    // clip distance) and textureGatherOffset with offsets known only at run time.
+    // clip distance) and textureGatherOffset with offsets known only at run time. And ASTC textures: without
+    // them create_texture returns null for an ASTC format and the caller falls back.
     on.features.shaderClipDistance = have.features.shaderClipDistance;
     on.features.shaderImageGatherExtended = have.features.shaderImageGatherExtended;
+    on.features.textureCompressionASTC_LDR = have.features.textureCompressionASTC_LDR;
     dev.clip_distance = have.features.shaderClipDistance;
     dev.gather_extended = have.features.shaderImageGatherExtended;
-    log("vulkan: shaderClipDistance %d, shaderImageGatherExtended %d", dev.clip_distance, dev.gather_extended);
+    dev.astc_ldr = have.features.textureCompressionASTC_LDR;
+    log("vulkan: shaderClipDistance %d, shaderImageGatherExtended %d, textureCompressionASTC_LDR %d",
+        dev.clip_distance, dev.gather_extended, dev.astc_ldr);
 
     float priority = 1.f;
     VkDeviceQueueCreateInfo qci = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
