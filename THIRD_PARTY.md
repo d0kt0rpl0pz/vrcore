@@ -38,7 +38,10 @@ result is not a glTF other viewers show textured: the image entry's `uri` names 
 Universal data, not plain ASTC). The decoded KTX2 files were compared with the source images through an
 independent decoder (astcenc 5.7.0): PSNR 46 to 57 dB. The tools are not vendored or built into anything.
 
-The controller models' licence (the generic ones and the per-device ones alike), as in the upstream's `packages/assets/LICENSE.md`:
+The controller models' licence (the generic ones and the per-device ones alike), as in the upstream's `packages/assets/LICENSE.md`.
+The APK carries that file unchanged (git blob `af9f7946cf9dac966b43c2d3d7dbd6144e7661fc` at the commit above) as
+`assets/licenses/webxr-input-profiles/LICENSE`, beside every model it covers: the generic pair and the six sets under
+`assets/controllers/` (`oculus-touch-v3`, `meta-quest-touch-plus`, `valve-index`, `htc-vive`, `pico-4`, `pico-neo3`).
 
 > MIT License
 >

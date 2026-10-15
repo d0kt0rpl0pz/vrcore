@@ -24,6 +24,11 @@ void input_set_haptics(const HapticSink &s);
 // xr/xr_actions.cpp: the profile now in force on a hand, without "/interaction_profiles/" ("" none).
 void input_set_profile(int hand, const char *profile);
 
+// ui/menu.cpp, after every update: a panel the pointer works on is up (the menu, or the message panel). The sim
+// gives the front its fake controller only while it is (sim.cpp THE FAKE CONTROLLER); the headset ignores it.
+void input_set_menu_up(bool up);
+bool input_menu_up();
+
 // pads.cpp: SDL gamepads in and out (both hosts), and the keyboard.
 void pads_init();                                   // after SDL_Init (SDL_INIT_GAMEPAD)
 void pads_event(const void *sdl_event);             // every SDL event the host pumps (added / removed, keys)

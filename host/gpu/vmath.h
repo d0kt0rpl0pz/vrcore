@@ -58,6 +58,14 @@ inline Mat4 mat4_rotate(const Quat &q)               // q is unit length
     return r;
 }
 
+inline void quat_rotate(const Quat &q, const float v[3], float out[3])     // v turned by q (unit length)
+{
+    float tx = 2.f * (q.y * v[2] - q.z * v[1]), ty = 2.f * (q.z * v[0] - q.x * v[2]), tz = 2.f * (q.x * v[1] - q.y * v[0]);
+    out[0] = v[0] + q.w * tx + (q.y * tz - q.z * ty);
+    out[1] = v[1] + q.w * ty + (q.z * tx - q.x * tz);
+    out[2] = v[2] + q.w * tz + (q.x * ty - q.y * tx);
+}
+
 inline Quat quat_mul(const Quat &a, const Quat &b)
 {
     return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,

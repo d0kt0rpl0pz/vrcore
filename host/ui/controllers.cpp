@@ -97,6 +97,19 @@ const Family kFamilies[] = {
     {"", "controller_left.glb", "controller_right.glb"},
 };
 
+// THE BUTTONS the menu's hint names, per profile: kept in step with the Bind tables in xr/xr_actions.cpp. Vive and
+// the simple controller have no B / Y; Index (and the Frame, bound as Index) no menu button.
+struct Buttons {
+    const char *profile;
+    bool secondary, menu;
+};
+const Buttons kButtons[] = {
+    {"oculus/touch_controller", true, true},    {"meta/touch_controller_plus", true, true},
+    {"khr/simple_controller", false, true},     {"valve/index_controller", true, false},
+    {"valve/frame_controller_valve", true, false}, {"htc/vive_controller", false, true},
+    {"bytedance/pico4_controller", true, true}, {"bytedance/pico_neo3_controller", true, true},
+};
+
 const Family &family(const char *profile)
 {
     for (const Family &f : kFamilies)
@@ -124,6 +137,16 @@ const char *controller_family_profile(int i)
     return kFamilies[i < 0 ? 0 : i >= n ? n - 1 : i].profile;
 }
 
+void controller_buttons(const char *profile, bool &secondary, bool &menu)
+{
+    secondary = menu = true;
+    for (const Buttons &b : kButtons)
+        if (profile && SDL_strcmp(b.profile, profile) == 0) {
+            secondary = b.secondary;
+            menu = b.menu;
+        }
+}
+
 void ControllerModels::destroy_model(gpu::Renderer &r, Model &m)
 {
     if (m.vertices) r.destroy_buffer(m.vertices);
@@ -137,14 +160,33 @@ void ControllerModels::set_profile(gpu::Renderer &r, int hand, const char *profi
 {
     if (hand < 0 || hand > 1 || !pipe_) return;
     if (loaded_[hand] && profile_[hand] == profile) return;
-    // The old model may still be read by frames in flight: it waits kRetireTicks ticks before it is freed.
-    if (models_[hand].vertices) retired_.push_back({std::move(models_[hand]), kRetireTicks});
-    models_[hand] = Model();
     const Family &f = family(profile);
     const char *file = hand == Input::kRight && f.right ? f.right : f.left;
     profile_[hand] = profile;
     loaded_[hand] = true;
-    const bool ok = load(r, asset_path(file).c_str(), models_[hand]);
+    ++uses_;
+    for (int i = 0; i < kCache; ++i)
+        if (cache_[i].file == file) {
+            slot_[hand] = i;
+            cache_[i].used = uses_;
+            log("ui: %s hand profile \"%s\": %s (kept)", hand ? "right" : "left", profile, file);
+            return;
+        }
+    // a free slot, else the least recently used one the other hand does not show. Its model may still be read by
+    // frames in flight: it waits kRetireTicks ticks before it is freed.
+    int pick = -1;
+    for (int i = 0; i < kCache && pick < 0; ++i)
+        if (cache_[i].file.empty()) pick = i;
+    if (pick < 0)
+        for (int i = 0; i < kCache; ++i)
+            if (i != slot_[1 - hand] && (pick < 0 || cache_[i].used < cache_[pick].used)) pick = i;
+    Cached &c = cache_[pick];
+    if (c.model.vertices || !c.model.textures.empty()) retired_.push_back({std::move(c.model), kRetireTicks});
+    c.model = Model();
+    c.file = file;
+    c.used = uses_;
+    slot_[hand] = pick;
+    const bool ok = load(r, asset_path(file).c_str(), c.model);
     log("ui: %s hand profile \"%s\": %s (%s)", hand ? "right" : "left", profile, file, ok ? "loaded" : "not drawn");
 }
 
@@ -254,11 +296,13 @@ bool ControllerModels::load(gpu::Renderer &r, const char *file, Model &m)
     }
     if (data) cgltf_free(data);
     SDL_free(bytes);
-    if (!ok || verts.empty() || idx.empty()) {
-        log("ui: %s holds no triangles: that controller is not drawn", file);
-        m.parts.clear();
+    // a failure leaves nothing behind: the textures read so far and any buffer made are freed here
+    auto fail = [&](const char *why) {
+        log("ui: %s %s: that controller is not drawn", file, why);
+        destroy_model(r, m);
         return false;
-    }
+    };
+    if (!ok || verts.empty() || idx.empty()) return fail("holds no triangles");
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     for (const Vertex &v : verts)
         for (int k = 0; k < 3; ++k) {
@@ -269,9 +313,10 @@ bool ControllerModels::load(gpu::Renderer &r, const char *file, Model &m)
     for (const Part &part : m.parts) textured += part.texture >= 0;
     m.vertices = r.create_buffer(gpu::BufferUsage::Vertex, verts.size() * sizeof(Vertex), verts.data());
     m.indices = r.create_buffer(gpu::BufferUsage::Index, idx.size() * sizeof(uint32_t), idx.data());
+    if (!m.vertices || !m.indices) return fail("got no buffers");
     log("ui: %s: %zu vertices, %zu triangles, %.3f x %.3f x %.3f m, %zu of %zu parts textured", file, verts.size(),
         idx.size() / 3, hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], textured, m.parts.size());
-    return m.vertices && m.indices;
+    return true;
 }
 
 bool ControllerModels::init(gpu::Renderer &r)
@@ -296,18 +341,24 @@ bool ControllerModels::init(gpu::Renderer &r)
     // pair, so a hand is never drawn bare
     set_profile(r, Input::kLeft, "");
     set_profile(r, Input::kRight, "");
-    return models_[Input::kLeft].vertices && models_[Input::kRight].vertices && cube_ && pipe_;
+    const Model *l = model(Input::kLeft), *rm = model(Input::kRight);
+    return l && l->vertices && rm && rm->vertices && cube_ && pipe_;
 }
 
 void ControllerModels::shutdown(gpu::Renderer &r)
 {
-    for (Model &m : models_) destroy_model(r, m);
+    for (Cached &c : cache_) {
+        destroy_model(r, c.model);
+        c = Cached();
+    }
     for (Retired &x : retired_) destroy_model(r, x.model);
     retired_.clear();
     for (int h = 0; h < 2; ++h) {
         profile_[h].clear();
         loaded_[h] = false;
+        slot_[h] = -1;
     }
+    uses_ = 0;
     if (cube_) r.destroy_buffer(cube_);
     if (pipe_) r.destroy_pipeline(pipe_);
     if (pipe_tex_) r.destroy_pipeline(pipe_tex_);
@@ -321,8 +372,9 @@ void ControllerModels::draw(gpu::Frame &f, const Draw hands[2]) const
     if (!pipe_) return;
     for (int h = 0; h < 2; ++h) {
         const Draw &d = hands[h];
-        const Model &m = models_[h];
-        if (!d.shown || !m.vertices || !m.indices) continue;
+        const Model *mp = model(h);
+        if (!d.shown || !mp || !mp->vertices || !mp->indices) continue;
+        const Model &m = *mp;
         Push p;
         p.model = mat4_mul(mat4_translate(d.grip.pos[0], d.grip.pos[1], d.grip.pos[2]), mat4_rotate(d.grip.rot));
         f.bind_vertices(m.vertices);

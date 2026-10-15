@@ -30,8 +30,12 @@ constexpr int kFadeMs = 20;
 // The device's rate (audio.cpp: open, test_start); the streaming thread restarts for a new one.
 void set_rate(int hz);
 
-// The tracks (paths); playing stops. Failures are forgotten.
-void set_tracks(std::vector<std::string> paths);
+// The tracks (paths); playing stops. Failures are forgotten. Returns the list's number (Status::list).
+uint32_t set_tracks(std::vector<std::string> paths);
+// The tracks replaced with nothing stopped (the folder scanned again): the file playing goes on, renumbered by its
+// place in `paths`; one no longer listed plays to its end, then the track after the one heard before it. Failures
+// are forgotten. Returns the list's number.
+uint32_t retarget(std::vector<std::string> paths);
 // Track i from its start; false when i is not in the list or there is no device rate.
 bool play(int i);
 // The track after the current one (the list wraps round); nothing when stopped.
@@ -41,7 +45,8 @@ void stop();
 void set_volume(int volume, int master);
 
 struct Status {
-    int track = -1;                 // the track heard now (-1: none, or stopped)
+    int track = -1;                 // the track heard now (-1: none, or stopped), in list `list`
+    uint32_t list = 0;              // the set_tracks / retarget list the streaming thread has taken (0: none yet)
     bool playing = false;
     int tracks = 0;
     int failed = 0;                 // tracks skipped as undecodable

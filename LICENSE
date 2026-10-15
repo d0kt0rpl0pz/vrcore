@@ -23,6 +23,8 @@ SOFTWARE.
 Third-party assets keep their own licenses and are not covered by the above:
 assets/wheel.glb is
 "MOMO STEERING WHEEL" by ijiklvn, under CC BY 4.0 (see README.md, Credits).
-assets/controller_left.glb and assets/controller_right.glb are
-the generic controller models of immersive-web/webxr-input-profiles, under MIT, Copyright (c) 2019 Amazon (see
-THIRD_PARTY.md).
+assets/controller_left.glb and assets/controller_right.glb (the generic pair), and
+the controller models under assets/controllers/: oculus-touch-v3, meta-quest-touch-plus, valve-index, htc-vive,
+pico-4 and pico-neo3 (each folder's .glb and .ktx2 files), are the controller models of
+immersive-web/webxr-input-profiles, converted as THIRD_PARTY.md says, under MIT, Copyright (c) 2019 Amazon: the
+licence is assets/licenses/webxr-input-profiles/LICENSE (see THIRD_PARTY.md).

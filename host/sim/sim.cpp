@@ -18,8 +18,11 @@
  * mouse's place in the window, so that it counts as movement (app/input.h LAST DEVICE). Its aim passes through the
  * point under the mouse, taken on the plane 1.1 m ahead of that eye (the menu's distance); the left button is its
  * trigger. Any key press is a pad or key input and hides the controllers (the menu's rule): P does nothing else
- * here, so it is the key to press for that; moving the mouse brings the controller back. The left hand reads
- * inactive. Headless, no hands, unless VR_SIM_PROFILE is set (below).
+ * here, so it is the key to press for that; moving the mouse brings the controller back. The front gets the hand
+ * only while the menu or the message panel is up (input_host.h input_menu_up, as the menu's last update left it);
+ * the rest of the time both hands read inactive, so a click is not a trigger in the game and no rig follows a hand
+ * fixed to the head. The input timing (LAST DEVICE) still sees it every frame, so a key that opens the menu hides
+ * it as before. The left hand reads inactive. Headless, no hands, unless VR_SIM_PROFILE is set (below).
  *
  * THE CONTROLLER MODELS. The sim reports no interaction profile, so the generic pair is drawn. F5 / F6 step the
  * family shown on the left / right hand through the table in ui/controllers.cpp (each press logs the profile; only
@@ -728,7 +731,8 @@ void Sim::update(int64_t display_ns)
     for (int i = 0; i < 3; ++i) in.head.pos[i] = head.pos[i];
     fill_mouse(in.mouse);
     fill_controller(in);
-    input_begin_frame(steady_ns() * 1e-9);
+    input_begin_frame(steady_ns() * 1e-9);              // LAST DEVICE sees the fake hand every frame
+    if (!input_menu_up()) in.hands[Input::kRight] = Hand();     // but the game never does (THE FAKE CONTROLLER)
     if (in.alt) {                                       // Option held: the keys are the fake head's, not the front's
         std::fill(std::begin(in.keys), std::end(in.keys), false);
         std::fill(std::begin(in.pressed), std::end(in.pressed), false);

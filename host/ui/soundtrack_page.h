@@ -21,11 +21,12 @@
  * WHEN IT PLAYS: from when it is switched on (and at launch when it was saved on and the folder can be read without
  * asking) until it is switched off, through the pause menu; it stops when the headset loses focus and starts the
  * track again from its beginning when the focus comes back. Shuffle plays the playlist once in a random order
- * before any track repeats.
+ * before any track repeats (through a loss of focus, and a new scan, too). In Repeat one, Next and Previous move to
+ * the playlist's next or previous track, which then repeats.
  *
- * THE KEYS, after the hooks' prefix: soundtrack.on, soundtrack.volume (0..100), soundtrack.playlist (its name),
- * soundtrack.mode (0 In order, 1 Shuffle, 2 Repeat one), soundtrack.track (the file's name), soundtrack.nowplaying.
- * Main thread only.
+ * THE KEYS, after the hooks' prefix: soundtrack.on, soundtrack.volume (0..100), soundtrack.playlist (its folder's
+ * name; empty: the loose files, library::kLoose), soundtrack.mode (0 In order, 1 Shuffle, 2 Repeat one),
+ * soundtrack.track (the file's name), soundtrack.nowplaying. Main thread only.
  */
 #pragma once
 
@@ -51,5 +52,7 @@ Item soundtrack_item(Menu &menu, const char *label = "Soundtrack");
 void soundtrack_menu_opened();
 void soundtrack_update(Menu &menu, const Tick &t, const Input &in);
 bool soundtrack_replacing();
+// (tests) The "Now playing" line, as last set (shown or not).
+std::string soundtrack_now_playing();
 
 }

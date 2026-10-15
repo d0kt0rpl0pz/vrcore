@@ -180,8 +180,15 @@ void overlay_render(Host &h, gpu::Frame &f)
     XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
     wi.timeout = XR_INFINITE_DURATION;
     r = xrWaitSwapchainImage(h.overlay, &wi);
-    if (XR_FAILED(r) || r == XR_TIMEOUT_EXPIRED || index >= h.overlay_target.framebuffers.size()) {
+    if (XR_FAILED(r) || r == XR_TIMEOUT_EXPIRED) {
+        // not waited on: releasing it would be out of order (XR_ERROR_CALL_ORDER_INVALID), so layers_release leaves it
         log("openxr: xrWaitSwapchainImage (overlay): %d", (int)r);
+        h.overlay_acquired = false;
+        return;
+    }
+    if (index >= h.overlay_target.framebuffers.size()) {
+        // waited on, so it is still released after the submit; only nothing is drawn into it
+        log("openxr: overlay image %u past its %zu framebuffers", index, h.overlay_target.framebuffers.size());
         return;
     }
     static const float kTransparent[4] = {0, 0, 0, 0};

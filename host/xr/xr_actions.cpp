@@ -176,6 +176,8 @@ bool actions_create(Host &h)
         !make_action(a, a.haptic, XR_ACTION_TYPE_VIBRATION_OUTPUT, "haptic", "Vibration"))
         return false;
 
+    // Which of these bind B / Y and the menu button is also in ui/controllers.cpp (THE BUTTONS, for the menu's hint):
+    // change both together.
     // Touch, Touch Plus: the same components (the right menu button is the system's)
     static const Bind kTouch[] = {
         {&Actions::grip, "/input/grip/pose", "/input/grip/pose"},

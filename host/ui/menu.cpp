@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "imgui_render.h"
+#include "input_host.h"
 #include "layers.h"
 #include "log.h"
 
@@ -39,7 +40,8 @@ const ImU32 kBack = IM_COL32(3, 3, 10, 245);                // (0.01, 0.01, 0.04
 // on two lines: the one line set most pages' width
 constexpr const char *kControlsLine[2] = {"move: stick   change: left/right or A", "back: B   close: menu"};
 
-// the same two lines for a pointer (a controller shows): widest() counts both, so nothing resizes with the switch
+// the same two lines for a pointer (a controller shows): widest() counts both, so nothing resizes with the switch.
+// The second is the widest it can be: point() leaves out what the hands' profiles do not bind (controller_buttons)
 constexpr const char *kPointerLine[2] = {"point and pull the trigger", "B back \xc2\xb7 menu close"};
 
 const ImU32 kGlow = IM_COL32(255, 255, 0, 16);              // a hovered row's wash
@@ -66,15 +68,6 @@ Quat yaw_quat(float yaw)
 }
 
 // a point in the panel's own space (x right, y up, +z towards you) to the room
-// a vector turned by a unit quaternion
-void rotate(const Quat &q, float x, float y, float z, float out[3])
-{
-    float tx = 2.f * (q.y * z - q.z * y), ty = 2.f * (q.z * x - q.x * z), tz = 2.f * (q.x * y - q.y * x);
-    out[0] = x + q.w * tx + (q.y * tz - q.z * ty);
-    out[1] = y + q.w * ty + (q.z * tx - q.x * tz);
-    out[2] = z + q.w * tz + (q.x * ty - q.y * tx);
-}
-
 void panel_point(const float pos[3], float yaw, float x, float y, float z, float out[3])
 {
     float c = std::cos(yaw), s = std::sin(yaw);
@@ -168,6 +161,7 @@ void Menu::shutdown(gpu::Renderer &r)
     if (ctx_) ImGui::DestroyContext(static_cast<ImGuiContext *>(ctx_));
     ctx_ = nullptr;
     open_ = showing_message_ = false;
+    input_set_menu_up(false);
 }
 
 void Menu::set_top(Page *top, const char *title)
@@ -411,6 +405,11 @@ void Menu::place(const Input &in)
 
 void Menu::update(const Tick &t, const Input &in)
 {
+    // whatever way this returns, the host learns whether a panel is up (the sim's fake controller: input_host.h)
+    struct Report {
+        const Menu *m;
+        ~Report() { input_set_menu_up(m->shown()); }
+    } report{this};
     now_ = steady_s();
     // the edges of this frame's buttons
     const Hand &lh = in.hands[Input::kLeft], &rh = in.hands[Input::kRight];
@@ -434,17 +433,16 @@ void Menu::update(const Tick &t, const Input &in)
         pads_now.push_back({p.id, p.south, p.east, p.start});
     }
     pads_was_ = pads_now;
-    // THE CONTROLLERS drawn (prepare): the rule's shown hands; the ray from the pointing one (as point picks it)
-    {
-        int ray = in.controller_shown(Input::kRight) && in.hands[Input::kRight].aim_tracked ? Input::kRight
-                : in.controller_shown(Input::kLeft) && in.hands[Input::kLeft].aim_tracked ? Input::kLeft : -1;
-        for (int h = 0; h < 2; ++h) {
-            ControllerModels::Draw &c = ctl_[h];
-            c.shown = in.controller_shown(h);
-            c.grip = in.hands[h].grip;
-            c.aim = in.hands[h].aim;
-            c.ray = h == ray;
-        }
+    // THE POINTER's hand: the right, else the left, shown by the rule with its aim tracked (-1 none). point() casts
+    // its ray, and the controllers drawn (prepare) give it the beam
+    pointing_ = in.controller_shown(Input::kRight) && in.hands[Input::kRight].aim_tracked ? Input::kRight
+              : in.controller_shown(Input::kLeft) && in.hands[Input::kLeft].aim_tracked ? Input::kLeft : -1;
+    for (int h = 0; h < 2; ++h) {
+        ControllerModels::Draw &c = ctl_[h];
+        c.shown = in.controller_shown(h);
+        c.grip = in.hands[h].grip;
+        c.aim = in.hands[h].aim;
+        c.ray = h == pointing_;
     }
     // the triggers' edges (on at 0.6, off under 0.4)
     for (int h = 0; h < 2; ++h) {
@@ -487,13 +485,10 @@ void Menu::update(const Tick &t, const Input &in)
     }
     if (!placed_) place(in);
 
-    visible_.clear();
-    for (Item &it : *page_)
-        if (!it.shown || it.shown()) visible_.push_back(&it);
-    if (visible_.empty()) return;
-    if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
-    if (sel_ < 0) sel_ = 0;
-    off_notes(+1);
+    if (!list_visible()) {                  // every row hidden: nothing to select, but B still leaves the page
+        if (back_pressed) back();
+        return;
+    }
 
     // THE POINTER: hover selects the row under the ray; the trigger's edge clicks it (THE ROW KINDS)
     if (dropdown_ >= (int)visible_.size() || (dropdown_ >= 0 && visible_[dropdown_]->choices.empty())) dropdown_ = -1;
@@ -505,7 +500,9 @@ void Menu::update(const Tick &t, const Input &in)
         if (pointing_ >= 0 && dropdown_ >= 0) {
             if (click) {
                 Item &d = *visible_[dropdown_];
-                if (drop_hover_ >= 0 && drop_hover_ < (int)d.choices.size() && d.pick) d.pick(drop_hover_);
+                // the value it already has is not set again: a setter may save or count it as a change by hand
+                const bool same = d.index && d.index() == drop_hover_;
+                if (drop_hover_ >= 0 && drop_hover_ < (int)d.choices.size() && d.pick && !same) d.pick(drop_hover_);
                 dropdown_ = -1;
                 acted = true;
             }
@@ -547,6 +544,8 @@ void Menu::update(const Tick &t, const Input &in)
         if (acted) haptic(pointing_, hold ? 0.3f : 0.6f, hold ? 0.02f : 0.05f);
     }
     if (!open_) return;                     // a Confirm's button closed the menu
+    // the click may have gone back a page (a Confirm's button), or hidden rows: the list again before it is read
+    if (!list_visible()) return;
     {
         // a Confirm row left puts it back to No; its button's focus goes with the Yes
         disarm(page_, visible_[sel_]);
@@ -595,8 +594,9 @@ void Menu::update(const Tick &t, const Input &in)
         if (dir == 4 && conf && button_focus_) button_focus_ = false;
         else if (dir == 4 && it.value && it.change) it.change(-1);
     }
-    if (open_ && select) {
-        Item &it = *visible_[std::min(sel_, n - 1)];
+    // the d-pad may have entered a page or changed a row this frame: A reads the list as it is now
+    if (open_ && select && list_visible()) {
+        Item &it = *visible_[sel_];
         if (it.kind == Kind::Confirm) {
             if (button_focus_) run_confirm(it);
             else if (armed(it)) button_focus_ = true;
@@ -612,17 +612,27 @@ void Menu::update(const Tick &t, const Input &in)
         else back();
     }
     // a row's change may have hidden rows or changed page: the list again for the draw
-    if (open_) {
-        visible_.clear();
-        for (Item &it : *page_)
-            if (!it.shown || it.shown()) visible_.push_back(&it);
-        if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
-        if (sel_ >= 0 && !visible_.empty()) {
-            off_notes(+1);
-            disarm(page_, visible_[sel_]);
-            if (!armed(*visible_[sel_])) button_focus_ = false;
-        }
+    if (open_ && list_visible()) {
+        disarm(page_, visible_[sel_]);
+        if (!armed(*visible_[sel_])) button_focus_ = false;
     }
+}
+
+// The page's shown rows into visible_, the selection kept on one of them (off a Note, as off_notes) and an open
+// dropdown dropped if its row is gone. False when the page shows no row: then nothing may read visible_[sel_].
+bool Menu::list_visible()
+{
+    visible_.clear();
+    for (Item &it : *page_)
+        if (!it.shown || it.shown()) visible_.push_back(&it);
+    if (dropdown_ >= (int)visible_.size()) dropdown_ = -1;
+    if (visible_.empty()) {
+        sel_ = 0;
+        return false;
+    }
+    sel_ = std::clamp(sel_, 0, (int)visible_.size() - 1);
+    off_notes(+1);
+    return true;
 }
 
 // The selection moved off a Note (text, not a control) to the next row in `step`'s direction, wrapping; it stays
@@ -732,8 +742,12 @@ void Menu::build_lines(std::vector<Line> &out, bool &has_help)
         item_segs(it, i == sel_, column, false, l);
     }
     line(font_, kFontPx, kPitch);
-    for (const char *c : pointer_hint_ ? kPointerLine : kControlsLine)
-        line(font_, kFontPx, kPitch).segs.push_back({c, kText, false});
+    if (pointer_hint_) {
+        line(font_, kFontPx, kPitch).segs.push_back({kPointerLine[0], kText, false});
+        line(font_, kFontPx, kPitch).segs.push_back({pointer_buttons_, kText, false});
+    } else {
+        for (const char *c : kControlsLine) line(font_, kFontPx, kPitch).segs.push_back({c, kText, false});
+    }
 
     // HELP: wrapped to the page's widest line; blank lines to the page's longest help
     has_help = false;
@@ -745,7 +759,7 @@ void Menu::build_lines(std::vector<Line> &out, bool &has_help)
     for (const Item &it : *page_)
         if (it.help) rows = std::max(rows, wrap(it.help).size());
     std::vector<std::string> help;
-    if (visible_[sel_]->help) help = wrap(visible_[sel_]->help);
+    if (sel_ >= 0 && sel_ < (int)visible_.size() && visible_[sel_]->help) help = wrap(visible_[sel_]->help);
     const float hp = kPitch * 0.75f;
     line(help_font_, kHelpPx, hp);
     for (size_t i = 0; i < rows; ++i) {
@@ -942,16 +956,20 @@ void Menu::draw_panel(ImDrawList *dl, float ox, float oy, const std::vector<Line
 void Menu::point(const Input &in, bool &click)
 {
     pointer_hint_ = in.controller_shown(Input::kLeft) || in.controller_shown(Input::kRight);
-    pointing_ = in.controller_shown(Input::kRight) && in.hands[Input::kRight].aim_tracked ? Input::kRight
-              : in.controller_shown(Input::kLeft) && in.hands[Input::kLeft].aim_tracked ? Input::kLeft : -1;
+    // the hint names B where either hand's profile binds it, and the menu button where the left's does
+    bool sec[2], menu[2];
+    for (int h = 0; h < 2; ++h) controller_buttons(controller_profile(h), sec[h], menu[h]);
+    const bool b = sec[0] || sec[1], m = menu[Input::kLeft];
+    pointer_buttons_ = b && m ? kPointerLine[1] : b ? "B back" : m ? "menu close" : "";
     int was = hover_row_;
     hit_id_ = hover_row_ = -1;
     hit_t_ = 0;
     click = false;
     if (pointing_ < 0) return;
     const Pose &a = in.hands[pointing_].aim;
+    static const float kForward[3] = {0, 0, -1};
     float d[3], best = 1e9f;
-    rotate(a.rot, 0, 0, -1, d);
+    quat_rotate(a.rot, kForward, d);
     for (const Quad &q : quads_) {
         // the quad's right (cos, 0, -sin) and normal (sin, 0, cos), as panel_point turns them
         float c = std::cos(q.yaw), s = std::sin(q.yaw);
@@ -1007,12 +1025,14 @@ void Menu::point(const Input &in, bool &click)
 
 void Menu::prepare(gpu::Frame &f)
 {
-    // the model each hand's profile calls for (input.h: "" in the sim, so the generic pair there)
+    bool up = (open_ || showing_message_) && ctx_ && render_ && panel_.layer;
+    // the model each hand's profile calls for (input.h: "" in the sim, so the generic pair there), asked only while
+    // the panel is up and they can be seen: a profile change in the game (hands and back) loads nothing mid-race
     if (gpu_ && models_.ready()) {
-        for (int h = 0; h < 2; ++h) models_.set_profile(*gpu_, h, controller_profile(h));
+        if (up)
+            for (int h = 0; h < 2; ++h) models_.set_profile(*gpu_, h, controller_profile(h));
         models_.tick(*gpu_);
     }
-    bool up = (open_ || showing_message_) && ctx_ && render_ && panel_.layer;
     auto hide = [](Drawn &d) {
         static const float kNowhere[3] = {0, 0, 0};
         if (d.layer) layer_place(d.layer, kNowhere, Quat{}, 1, 1, false);

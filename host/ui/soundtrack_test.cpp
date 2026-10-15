@@ -319,8 +319,65 @@ Item *row(Page &page, const char *label)
     return nullptr;
 }
 
+bool shown(const Item &it) { return !it.shown || it.shown(); }
+
+int count_shown(const Page &page)
+{
+    int n = 0;
+    for (const Item &it : page) n += shown(it);
+    return n;
+}
+
+// The newest scan's playlist `name` (the loose one when `loose`); -1 none.
+int playlist_at(const char *name, bool loose = false)
+{
+    auto s = lib::last();
+    for (size_t i = 0; s && i < s->playlists.size(); ++i)
+        if (s->playlists[i].loose == loose && (loose || s->playlists[i].name == name)) return (int)i;
+    return -1;
+}
+
+const lib::Playlist *playlist_named(const char *name, bool loose = false)
+{
+    const int i = playlist_at(name, loose);
+    return i < 0 ? nullptr : &lib::last()->playlists[i];
+}
+
+bool has_file(const lib::Playlist *p, const std::string &file)
+{
+    if (p)
+        for (const lib::Track &t : p->tracks)
+            if (t.file == file) return true;
+    return false;
+}
+
+// The folder scanned again, as the menu's opening does, and the page given the new scan.
+bool rescan(Driver &d)
+{
+    auto before = lib::last();
+    soundtrack_menu_opened();
+    const bool ok = d.until([&] { return !lib::scanning() && lib::last() != before; });
+    d.tick(3);
+    return ok;
+}
+
 void check_page(Report &r, const fs::path &dir)
 {
+    // more for the page than check_scan wants: 15 tracks (one with a 100-character name), and a folder that has the
+    // loose playlist's name
+    std::error_code ec;
+    const fs::path root = dir / "Soundtracks", src = dir / "src";
+    fs::create_directories(root / "Many", ec);
+    for (int i = 1; i <= 14; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof name, "%02d many.wav", i);
+        fs::copy_file(src / "440.wav", root / "Many" / name, ec);
+    }
+    const std::string long_name = std::string(100, 'L') + ".wav";
+    fs::copy_file(src / "523.wav", root / "Many" / long_name, ec);
+    fs::create_directories(root / lib::kLoose, ec);
+    fs::copy_file(src / "659.wav", root / lib::kLoose / "659 folder.wav", ec);
+
     const char *prefix = "t.";
     st::set_path((dir / "settings.txt").string().c_str());
     st::open("vrcore", "soundtrack-test");
@@ -340,8 +397,13 @@ void check_page(Report &r, const fs::path &dir)
     Item top = soundtrack_item(d.menu);
     Page &pg = *top.sub;
     Item *on = row(pg, "Custom soundtrack"), *next = row(pg, "Next"), *mode = row(pg, "Mode");
-    r.check(on && next && mode && row(pg, "Tracks") && row(pg, "Playlist") && row(pg, "Volume"), "the page has its rows");
-    if (!on || !next || !mode) return;
+    Item *tracks = row(pg, "Tracks"), *pl = row(pg, "Playlist");
+    r.check(on && next && mode && tracks && tracks->sub && pl && row(pg, "Volume"), "the page has its rows");
+    if (!on || !next || !mode || !tracks || !tracks->sub || !pl) return;
+    Page &tp = *tracks->sub;
+    std::vector<Item *> track_rows;                     // the window's ten rows
+    for (Item &it : tp)
+        if (it.press && it.label_fn && it.kind == Kind::Legacy) track_rows.push_back(&it);
 
     // the device opens after the launch scan (as on the headset): the start that failed is tried again
     snd::set_rate(0);
@@ -372,7 +434,7 @@ void check_page(Report &r, const fs::path &dir)
     seq = walk(d, *next, prefix, 4);
     line.clear();
     for (const std::string &s : seq) line += (line.empty() ? "" : ", ") + s;
-    const lib::Playlist &alpha = lib::last()->playlists[0];
+    const lib::Playlist &alpha = *playlist_named("Alpha");
     int at = -1;
     for (size_t i = 0; i < alpha.tracks.size(); ++i)
         if (alpha.tracks[i].file == seq[0]) at = (int)i;
@@ -380,11 +442,148 @@ void check_page(Report &r, const fs::path &dir)
     for (int i = 1; i < 4 && ordered; ++i) ordered = seq[i] == alpha.tracks[(at + i) % 3].file;
     r.check(ordered, "in order follows the playlist and wraps: %s", line.c_str());
 
-    // repeat one: Next stays on the track
+    // repeat one: Next moves to the playlist's next track, which then repeats
     mode->pick(2);
     d.tick(5);
     seq = walk(d, *next, prefix, 2);
-    r.check(seq[0] == seq[1], "repeat one stays on its track: %s, %s", seq[0].c_str(), seq[1].c_str());
+    at = -1;
+    for (size_t i = 0; i < alpha.tracks.size(); ++i)
+        if (alpha.tracks[i].file == seq[0]) at = (int)i;
+    r.check(at >= 0 && seq[1] == alpha.tracks[(at + 1) % 3].file, "repeat one: Next moves to the next track: %s, %s",
+            seq[0].c_str(), seq[1].c_str());
+    {
+        const uint64_t from = snd::status().decoded;
+        bool same = true;
+        d.until([&] {
+            snd::Status s = snd::status();
+            same = same && saved_track(prefix) == seq[1] && s.playing && s.tracks == 1;
+            return !same || s.decoded > from + 3 * kHz;
+        });
+        r.check(same, "repeat one: %s plays three times over, nothing else", seq[1].c_str());
+    }
+
+    // a track chosen on the Tracks page is saved and announced (not left at the one before)
+    mode->pick(0);
+    d.tick(5);
+    {
+        int cur = -1;
+        for (size_t i = 0; i < alpha.tracks.size(); ++i)
+            if (alpha.tracks[i].file == saved_track(prefix)) cur = (int)i;
+        const int want = (cur + 1 + 3) % 3;
+        const lib::Track &t = alpha.tracks[want];
+        if (track_rows.size() == 10) track_rows[want]->press();
+        const bool got = d.until([&] { return saved_track(prefix) == t.file; }, 1000);
+        r.check(got && soundtrack_now_playing() == "Now playing: " + t.label(), "Tracks page: track %d (%s) is saved and announced (\"%s\")",
+                want + 1, saved_track(prefix).c_str(), soundtrack_now_playing().c_str());
+    }
+    // a new playlist: the key names one of its files
+    pl->pick(playlist_at("Beta"));
+    r.check(d.until([&] { return has_file(playlist_named("Beta"), saved_track(prefix)); }, 1000),
+            "playlist switched to Beta: the saved track is Beta's (%s)", saved_track(prefix).c_str());
+
+    // the folder changes under it: a track added to Beta joins the list with nothing stopped
+    {
+        const uint32_t list = snd::status().list;
+        fs::copy_file(src / "392.wav", root / "Beta" / "600 added.wav", ec);
+        bool playing = true;
+        auto before = lib::last();
+        soundtrack_menu_opened();
+        d.until([&] {
+            playing = playing && snd::status().playing;
+            return !lib::scanning() && lib::last() != before;
+        });
+        for (int i = 0; i < 5; ++i) {
+            d.tick();
+            playing = playing && snd::status().playing;
+            sleep_ms(10);
+        }
+        const bool joined = d.until([&] { return saved_track(prefix) == "600 added.wav"; });
+        std::string marked;
+        for (Item *it : track_rows)
+            if (it->label_fn().rfind("* ", 0) == 0) marked = it->label_fn();
+        r.check(playing && snd::status().list != list && joined &&
+                    soundtrack_now_playing() == "Now playing: 600 added" && marked.find("600 added") != std::string::npos,
+                "a track added to the folder: played next, nothing stopped, saved, announced, marked (\"%s\")",
+                marked.c_str());
+    }
+
+    // the loose files and a folder of the same name: each saved and restored as itself
+    {
+        auto restored = [&] {
+            soundtrack_load(h);
+            rescan(d);
+            return pl->index();
+        };
+        const int folder = playlist_at(lib::kLoose), loose = playlist_at(nullptr, true);
+        pl->pick(folder);
+        d.tick(3);
+        const std::string as_folder = st::get_string("t.soundtrack.playlist", "?");
+        const int got_folder = restored();
+        pl->pick(loose);
+        d.tick(3);
+        const std::string as_loose = st::get_string("t.soundtrack.playlist", "?");
+        const int got_loose = restored();
+        r.check(folder >= 0 && loose >= 0 && folder != loose && got_folder == folder && got_loose == loose &&
+                    as_folder == lib::kLoose && as_loose.empty(),
+                "a folder named \"%s\" and the loose files: saved as \"%s\" and \"%s\", restored to %d and %d (of %d, %d)",
+                lib::kLoose, as_folder.c_str(), as_loose.c_str(), got_folder, got_loose, folder, loose);
+    }
+
+    // shuffle through a loss of focus: every track once before any repeats
+    pl->pick(playlist_at("Many"));
+    mode->pick(1);
+    {
+        std::vector<std::string> heard;
+        bool lost = false;
+        d.until([&] {
+            const std::string t = saved_track(prefix);
+            if (has_file(playlist_named("Many"), t) && (heard.empty() || heard.back() != t)) heard.push_back(t);
+            if (heard.size() == 3 && !lost) {
+                lost = true;
+                d.t.focused = false;
+                d.tick(3);
+                sleep_ms(50);
+                d.t.focused = true;
+            }
+            return heard.size() >= 15;
+        }, 15000);
+        std::set<std::string> distinct(heard.begin(), heard.end());
+        r.check(lost && heard.size() == 15 && distinct.size() == 15,
+                "shuffle, focus lost after 3 tracks: the next 12 are the 12 not played yet (%zu heard, %zu different)",
+                heard.size(), distinct.size());
+    }
+
+    // the Tracks window: as many rows at every scroll, none longer than its room, the count a note
+    {
+        const int n0 = count_shown(tp);
+        bool same = true, fits = true;
+        for (int w = 0; w < 5; ++w) {
+            track_rows.back()->edge(+1);                // down off the window's end: it scrolls by one
+            same = same && count_shown(tp) == n0;
+        }
+        for (const Item &it : tp)
+            if (it.label_fn && it.label_fn().size() > it.label.size()) fits = false;
+        bool long_shown = false;
+        for (Item *it : track_rows) long_shown = long_shown || it->label_fn().find("LLLL") != std::string::npos;
+        track_rows.front()->edge(-1);
+        same = same && count_shown(tp) == n0;
+        for (const Item &it : pg)
+            if (it.label_fn && it.label_fn().size() > it.label.size()) fits = false;
+        const Item *count = nullptr;
+        for (const Item &it : tp)
+            if (it.label_fn && it.label_fn().rfind("Showing ", 0) == 0) count = &it;
+        r.check(same && fits && long_shown && count && count->kind == Kind::Note,
+                "the Tracks window: %d rows at every scroll, a 100-character name within its row, the count a note", n0);
+    }
+
+    // the saved playlist's folder deleted: back to the loose files
+    pl->pick(playlist_at("Beta"));
+    d.until([&] { return has_file(playlist_named("Beta"), saved_track(prefix)); }, 1000);
+    fs::remove_all(root / "Beta", ec);
+    rescan(d);
+    const bool fell = d.until([&] { return has_file(playlist_named(nullptr, true), saved_track(prefix)); });
+    r.check(fell && pl->value() == lib::kLoose && snd::status().playing && st::get_string("t.soundtrack.playlist", "") == "Beta",
+            "Beta deleted: the loose files play (%s), Beta still the saved choice", saved_track(prefix).c_str());
 
     // the game's music volume: 0 while it plays, back when it is off, 0 again when on
     music.clear();

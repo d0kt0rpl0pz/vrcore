@@ -225,6 +225,7 @@ public:
 
 private:
     void off_notes(int step);
+    bool list_visible();
     struct Line;
     void place(const Input &in);
     void build_lines(std::vector<Line> &out, bool &has_help);
@@ -301,6 +302,7 @@ private:
     int pointing_ = -1;                     // the hand that points (Input::kLeft / kRight), -1 none
     bool trigger_was_[2] = {}, trigger_pressed_[2] = {};
     bool pointer_hint_ = false;             // a controller shows: the controls line reads the pointer wording
+    std::string pointer_buttons_;           // its second line: what the hands' profiles bind of B and menu
     int hover_zone_ = 0;                    // the part of the hovered row under the ray (menu.cpp Zone)
     int dropdown_ = -1;                     // the visible row whose dropdown is open (-1 none)
     int drop_hover_ = -1;                   // the dropdown's choice under the ray

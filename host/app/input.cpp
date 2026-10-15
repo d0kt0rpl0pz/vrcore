@@ -15,6 +15,7 @@ Input g_input;
 HapticSink g_haptics;
 double g_last = -1;
 char g_profile[2][64];
+bool g_menu_up = false;
 
 // LAST DEVICE (input.h): what each hand was doing last frame, and the place its movement is counted from.
 constexpr float kMoveInput = 0.02f;         // metres a hand moves before that is input
@@ -93,6 +94,9 @@ void input_set_profile(int hand, const char *profile)
     if (hand < 0 || hand > 1) return;
     SDL_strlcpy(g_profile[hand], profile ? profile : "", sizeof g_profile[hand]);
 }
+
+void input_set_menu_up(bool up) { g_menu_up = up; }
+bool input_menu_up() { return g_menu_up; }
 
 const char *controller_profile(int hand) { return hand == 0 || hand == 1 ? g_profile[hand] : ""; }
 

@@ -14,13 +14,6 @@ namespace vrcore::rig {
 
 namespace {
 
-// q applied to v
-void rotate(const Quat &q, const float v[3], float out[3])
-{
-    Mat4 m = mat4_rotate(q);
-    for (int i = 0; i < 3; ++i) out[i] = m.m[i] * v[0] + m.m[4 + i] * v[1] + m.m[8 + i] * v[2];
-}
-
 float length(const float v[2]) { return std::sqrt(v[0] * v[0] + v[1] * v[1]); }
 
 }
@@ -187,8 +180,8 @@ void Rig::fly(const Input &in, bool ready)
     Quat q = in.head_tracked ? in.head.rot : quat_axis_angle(0, 1, 0, yaw_);
     static const float kForward[3] = {0, 0, -1}, kRight[3] = {1, 0, 0};
     float fwd[3], right[3];
-    rotate(q, kForward, fwd);
-    rotate(q, kRight, right);
+    quat_rotate(q, kForward, fwd);
+    quat_rotate(q, kRight, right);
     for (int i = 0; i < 3; ++i) {
         float d = (fwd[i] * move[1] + right[i] * move[0]) * speed + (i == 1 ? lift * speed : 0.f);
         seat_[i] -= d;

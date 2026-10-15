@@ -234,8 +234,9 @@ last gamepad or key input (`Input::controller_shown`, `app/input.h`). Any pad or
 looks as it did before a pointer existed; picking a controller up brings them back. They never draw in the game.
 
 **The hint line.** The controls line at the bottom of the panel is the host's: pointer wording ("point and pull the
-trigger", "B back, menu close") while a controller shows, the d-pad wording otherwise. Both are counted when the
-panel is sized, so it does not change size with the switch. A front's own CONTROLS legend is not touched.
+trigger", "B back, menu close", leaving out B or menu where the controller's profile binds no such button) while a
+controller shows, the d-pad wording otherwise. Both are counted when the panel is sized, so it does not change size
+with the switch. A front's own CONTROLS legend is not touched.
 
 **The controllers and the ray** are drawn by the menu itself (`ui/controllers.h`): a model for the
 device in that hand, at each shown hand's grip: the interaction profile the runtime reports for the hand
@@ -256,8 +257,8 @@ the eye pipelines and views, has its own depth, and costs nothing on frames it i
 hide rule, the dropdown and the row kinds' pictures, and sizing (the panel reserves room for the longest choice list,
 the Confirm button and each row's reserved value, so it never grows while open). A front writes its pages and
 nothing else. `host/test/menu_front.cpp` (the `vrcore_menu` target, desktop only, built beside `vrcore_scene`) is a game-free
-page set using every kind; `--menu` opens it at the start and `--page NAME` on a sub page, for a headless `--shot`; in the sim the mouse is the right controller (left button the
-trigger, `P` pretends a gamepad was pressed).
+page set using every kind; `--menu` opens it at the start and `--page NAME` on a sub page, for a headless `--shot`; in the sim the mouse is the right controller while the menu or the
+message panel is up (left button the trigger, `P` pretends a gamepad was pressed); the game never sees it.
 
 ### The soundtrack page
 
@@ -277,9 +278,12 @@ ui::soundtrack_update(menu, tick, input);   // every update, after menu.update
 that option). `master_volume` gives VR_OPT_VOLUME's value; the soundtrack sits under it.
 
 The songs are in `Music/Soundtracks` in the headset's shared storage (`~/Music/Soundtracks` in the sim); each subfolder
-is a playlist and loose files make "All loose tracks". `.mp3 .m4a .aac .flac .ogg .wav`, decoded by the platform.
-Access to the folder is asked for only when its row ("Allow access to music") is pressed, never at launch; the page's
-alert lines are `ui::note` rows, which the cursor and the pointer skip. The page's choices are saved per game under `<prefix>soundtrack.*`.
+is a playlist and loose files make "All tracks" (saved as an empty name, so a folder called that is its own
+playlist). `.mp3 .m4a .aac .flac .ogg .wav`, decoded by the platform. The folder is scanned again each time the menu
+opens; a change to the playing playlist's files goes on with the track heard, if it is still there. Access to the
+folder is asked for only when its row ("Allow access to music") is pressed, never at launch; the page's alert lines
+are `ui::note` rows, which the cursor and the pointer skip. The page's choices are saved per game under
+`<prefix>soundtrack.*`.
 
 `Item::label_fn` and `Item::edge` (`ui/menu.h`, A SCROLLING WINDOW) are what let a page show a window of a long
 list: a few fixed rows whose text follows an offset, scrolled by up / down off the window's ends.

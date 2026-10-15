@@ -12,7 +12,9 @@
  * on its own sets no mark: the next one follows on in the ring.
  *
  * THE TRACK HEARD. The ring runs ahead of the ears, so the streaming thread notes where its newest track begins
- * (track_from) and the one before; status() compares that with r.
+ * (track_from) and the one before; status() compares that with r. Both are indices into the list the streaming
+ * thread has taken (list_heard): a new list forgets the one before (its index meant the old list), and a retarget
+ * moves both to their places in the new list.
  */
 #include "soundtrack.h"
 
@@ -65,6 +67,8 @@ struct State {
     bool run = false;                       // playing asked for
     bool quit = false;
     std::atomic<uint32_t> gen{0};           // one more each command (written under m)
+    uint32_t list = 0;                      // one more each set_tracks and retarget
+    bool retargeted = false, commanded = false;     // since the streaming thread last looked
     std::thread thread;
     int thread_hz = 0;                      // the rate the streaming thread resamples to
     std::atomic<int> hz{0};
@@ -77,6 +81,7 @@ struct State {
     std::atomic<float> volume{1.f};         // the soundtrack's volume times the master, 0..1
     std::atomic<int> track_prev{-1}, track_now{-1};
     std::atomic<uint64_t> track_from{0};    // where track_now begins in the ring
+    std::atomic<uint32_t> list_heard{0};    // the list track_now and track_prev index (State::list)
 
     // the stats
     std::atomic<uint64_t> frames{0}, dry{0}, decoded{0};
@@ -88,10 +93,10 @@ struct State {
     bool skipping = false;                  // fading out to a skip's mark
 } g;
 
-// The newest track begins at ring index `from` (-1: none).
-void heard_from(int track, uint64_t from)
+// The newest track begins at ring index `from` (-1: none); `new_list`: the one before was in another list.
+void heard_from(int track, uint64_t from, bool new_list = false)
 {
-    g.track_prev.store(g.track_now.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    g.track_prev.store(new_list ? -1 : g.track_now.load(std::memory_order_relaxed), std::memory_order_relaxed);
     g.track_from.store(from, std::memory_order_relaxed);
     g.track_now.store(track, std::memory_order_release);
 }
@@ -111,9 +116,11 @@ public:
             return;
         }
         uint32_t seen = g.gen.load() - 1;   // the first pass takes the current command
+        bool first = true;
         for (;;) {
-            bool fresh, want_run;
+            bool fresh, want_run, keep = false, new_list = false;
             int want;
+            std::vector<std::string> old;
             {
                 std::unique_lock<std::mutex> lk(g.m);
                 g.cv.wait_for(lk, kPoll, [&] { return g.quit || g.gen.load() != seen; });
@@ -122,10 +129,22 @@ public:
                 seen = g.gen.load();
                 want_run = g.run;
                 want = g.want;
-                if (fresh) list_ = g.tracks;
+                if (fresh) {
+                    keep = g.retargeted && !g.commanded;   // a play with it: that play, in the new list
+                    g.retargeted = g.commanded = false;
+                    new_list = g.list != list_n_ || first;
+                    list_n_ = g.list;
+                    old.swap(list_);
+                    list_ = g.tracks;
+                }
             }
+            first = false;
             gen_ = seen;
-            if (fresh) command(want_run, want);
+            if (fresh) {
+                if (keep && !list_.empty()) retarget(old);
+                else command(want_run, want, new_list);
+                g.list_heard.store(list_n_, std::memory_order_release);
+            }
             if (dec_ || ended_) fill();
         }
         dec_.reset();
@@ -134,7 +153,7 @@ public:
 
 private:
     // A play, next, stop or a new list: what plays is dropped, and a skip marked at the ring's end.
-    void command(bool want_run, int want)
+    void command(bool want_run, int want, bool new_list)
     {
         dec_.reset();
         ended_ = false;
@@ -142,8 +161,27 @@ private:
         uint64_t w = g.w.load(std::memory_order_relaxed);
         g.start.store(w, std::memory_order_release);
         cur_ = want_run ? open_from(want) : -1;
-        heard_from(cur_, w);
+        heard_from(cur_, w, new_list);
         g.playing.store(cur_ >= 0, std::memory_order_release);
+    }
+
+    // A retarget: `old` was the list, list_ is the new one. What is decoding goes on, renumbered. A file no longer
+    // listed plays to its end as the one heard before it (so the one after that follows); nothing else is skipped.
+    void retarget(const std::vector<std::string> &old)
+    {
+        auto at = [&](int i) {
+            if (i < 0 || i >= (int)old.size()) return -1;
+            auto it = std::find(list_.begin(), list_.end(), old[i]);
+            return it == list_.end() ? -1 : (int)(it - list_.begin());
+        };
+        const int prev = at(g.track_prev.load(std::memory_order_relaxed));
+        int now = at(g.track_now.load(std::memory_order_relaxed));
+        if (cur_ >= 0) {
+            cur_ = at(cur_);
+            if (cur_ < 0) cur_ = now = prev >= 0 ? prev : (int)list_.size() - 1;
+        }
+        g.track_prev.store(prev, std::memory_order_relaxed);
+        g.track_now.store(now, std::memory_order_release);
     }
 
     // The first track from i on (wrapping round) that opens; -1 when none does.
@@ -230,6 +268,7 @@ private:
     bool ended_ = false;                    // the decoder is done: the resampler's last frames to the ring
     int cur_ = -1;
     uint32_t gen_ = 0;                      // the command this work is for
+    uint32_t list_n_ = 0;                   // the list list_ is (State::list)
     std::vector<std::string> list_;
     float in_[kChunk * kMaxDecodeChannels];
     float stereo_[kChunk][2];
@@ -244,6 +283,7 @@ void stream_main(int hz)
 // A command for the streaming thread (under g.m), and the thread started if it is not running.
 void command_locked(bool run, int want)
 {
+    g.commanded = true;
     g.run = run;
     g.want = want;
     g.gen.fetch_add(1);
@@ -262,17 +302,41 @@ void set_rate(int hz)
     g.hz = hz;
 }
 
-void set_tracks(std::vector<std::string> paths)
+uint32_t set_tracks(std::vector<std::string> paths)
 {
     g.playing = false;
+    uint32_t list;
     {
         std::lock_guard<std::mutex> lk(g.m);
         g.tracks = std::move(paths);
         g.failures.assign(g.tracks.size(), std::string());
         g.failed = 0;
+        list = ++g.list;
         command_locked(false, -1);
     }
     g.cv.notify_all();
+    return list;
+}
+
+uint32_t retarget(std::vector<std::string> paths)
+{
+    uint32_t list;
+    {
+        std::lock_guard<std::mutex> lk(g.m);
+        if (g.want >= 0 && g.want < (int)g.tracks.size()) {
+            // a play the streaming thread has not taken yet: the same file, in the new list
+            auto it = std::find(paths.begin(), paths.end(), g.tracks[g.want]);
+            g.want = it == paths.end() ? -1 : (int)(it - paths.begin());
+        }
+        g.tracks = std::move(paths);
+        g.failures.assign(g.tracks.size(), std::string());
+        g.failed = 0;
+        list = ++g.list;
+        g.retargeted = true;
+        g.gen.fetch_add(1);
+    }
+    g.cv.notify_all();
+    return list;
 }
 
 bool play(int i)
@@ -316,6 +380,7 @@ void set_volume(int volume, int master)
 Status status()
 {
     Status s;
+    s.list = g.list_heard.load(std::memory_order_acquire);
     uint64_t r = g.r.load(std::memory_order_acquire);
     int now = g.track_now.load(std::memory_order_acquire);
     s.playing = g.playing.load();
