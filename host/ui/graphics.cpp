@@ -43,8 +43,6 @@ std::string fmt(const char *f, double v)
     return b;
 }
 
-int wrap(int v, int d, int n) { return ((v + d) % n + n) % n; }
-
 // the listed rate nearest hz (a tie: the lower)
 int rate_index_for(float hz)
 {
@@ -138,18 +136,6 @@ void set_profile(int p)
     apply();
 }
 
-Item item(const char *label, std::function<std::string()> value, std::function<void(int)> change, const char *help,
-          bool gap = false)
-{
-    Item it;
-    it.label = label;
-    it.value = std::move(value);
-    it.change = std::move(change);
-    it.help = help;
-    it.gap = gap;
-    return it;
-}
-
 }
 
 void graphics_load(const GraphicsHooks &hooks, Options &o)
@@ -206,46 +192,55 @@ GraphicsRows graphics_rows(const Options &o)
 
     GraphicsRows rows;
     rows.sharpen_shown = hs.sharpen && hs.foveation;   // the headset offers sharpening
-    rows.profile.push_back(item(
-        "Graphics profile", [] { return std::string(kProfileNames[gfx.profile]); },
-        [](int d) { set_profile(wrap(gfx.profile, d, 3)); }, g_hooks.help_profile));
-    rows.profile.push_back(item(
-        "Refresh rate", [] { return fmt("%.0f Hz", gfx.rates[gfx.rate]); },
-        [](int d) {
-            gfx.rate = wrap(gfx.rate, d, (int)gfx.rates.size());
+    // Each is a typed row (menu.h THE ROW KINDS): the d-pad cycles a choice and steps the eye resolution as the
+    // legacy rows did, the pointer gets a dropdown and the stepper's halves.
+    std::vector<std::string> rates;
+    for (float r : gfx.rates) rates.push_back(fmt("%.0f Hz", r));
+    rows.profile.push_back(choice(
+        "Graphics profile", {kProfileNames[0], kProfileNames[1], kProfileNames[2]}, [] { return gfx.profile; },
+        [](int i) { set_profile(i); }));
+    rows.profile.push_back(choice(
+        "Refresh rate", rates, [] { return gfx.rate; },
+        [](int i) {
+            gfx.rate = i;
             save_rate();
             changed_by_hand();
             apply();
-        },
-        g_hooks.help_rate));
-    rows.profile.push_back(item(
-        "Eye resolution", [] { return "x" + fmt("%.1f", gfx.eye); },
-        [](int d) {
-            gfx.eye = clampf((float)std::nearbyint(gfx.eye * 10.f + d) / 10.f, 1.f, 3.f);
+        }));
+    rows.profile.push_back(stepper(
+        "Eye resolution", [] { return gfx.eye; },
+        [](float v) {
+            gfx.eye = v;
             save_eye();
             changed_by_hand();
             apply();
         },
-        g_hooks.help_eye));
-    rows.profile.push_back(item(
-        "Foveated rendering", [] { return std::string(kFoveationNames[gfx.foveation]); },
-        [](int d) {
-            gfx.foveation = wrap(gfx.foveation, d, 4);
+        0.1f, 1.f, 3.f, [](float v) { return "x" + fmt("%.1f", v); }));
+    rows.profile.push_back(choice(
+        "Foveated rendering", {kFoveationNames[0], kFoveationNames[1], kFoveationNames[2], kFoveationNames[3]},
+        [] { return gfx.foveation; },
+        [](int i) {
+            gfx.foveation = i;
             save_foveation();
             changed_by_hand();
             apply();
-        },
-        g_hooks.help_foveation));
-    rows.sharpen = item(
-        "Sharpening", [] { return std::string(kSharpenNames[gfx.sharpen]); },
-        [](int d) {
-            gfx.sharpen = wrap(gfx.sharpen, d, 3);
+        }));
+    rows.sharpen = choice(
+        "Sharpening", {kSharpenNames[0], kSharpenNames[1], kSharpenNames[2]}, [] { return gfx.sharpen; },
+        [](int i) {
+            gfx.sharpen = i;
             st::set_int(key("sharpen").c_str(), gfx.sharpen);
             apply();
-        },
-        g_hooks.help_sharpen, true);
+        });
+    rows.sharpen.gap = true;
     bool shown = rows.sharpen_shown;
     rows.sharpen.shown = [shown] { return shown; };
+    // the help lines the game gave
+    rows.profile[0].help = g_hooks.help_profile;
+    rows.profile[1].help = g_hooks.help_rate;
+    rows.profile[2].help = g_hooks.help_eye;
+    rows.profile[3].help = g_hooks.help_foveation;
+    rows.sharpen.help = g_hooks.help_sharpen;
     return rows;
 }
 
