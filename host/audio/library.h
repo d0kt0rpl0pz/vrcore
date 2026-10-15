@@ -30,7 +30,7 @@
 
 namespace vrcore::audio::library {
 
-constexpr const char *kLoose = "All loose tracks";
+constexpr const char *kLoose = "All tracks";
 constexpr const char *kFolderKey = "soundtrack.folder";     // the chosen folder (a ref), in the game's settings
 
 struct Track {

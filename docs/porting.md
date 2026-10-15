@@ -259,6 +259,31 @@ nothing else. `host/test/menu_front.cpp` (the `vrcore_menu` target, desktop only
 page set using every kind; `--menu` opens it at the start and `--page NAME` on a sub page, for a headless `--shot`; in the sim the mouse is the right controller (left button the
 trigger, `P` pretends a gamepad was pressed).
 
+### The soundtrack page
+
+The player's own music, played by the host in place of the game's, with a page to choose it (`ui/soundtrack_page.h`).
+No plugin export or ABI call is involved: the host mixes it after the game's sound, locked to the head. A front adds
+one row and three calls:
+
+```cpp
+ui::soundtrack_load(hooks);                 // AppInfo::load_settings, after settings::open
+top.push_back(ui::soundtrack_item(menu));   // the "Soundtrack" row, where the front builds its top page
+h.on_open = [] { ui::soundtrack_menu_opened(); };         // ui::Hooks: scan the folder again
+ui::soundtrack_update(menu, tick, input);   // every update, after menu.update
+```
+
+`SoundtrackHooks::options_changed` is called when `ui::soundtrack_replacing()` flips; the front sends the game
+`VR_OPT_MUSIC_VOL` 0 while it is true and the player's saved music volume otherwise (so the game only has to honour
+that option). `master_volume` gives VR_OPT_VOLUME's value; the soundtrack sits under it.
+
+The songs are in `Music/Soundtracks` in the headset's shared storage (`~/Music/Soundtracks` in the sim); each subfolder
+is a playlist and loose files make "All loose tracks". `.mp3 .m4a .aac .flac .ogg .wav`, decoded by the platform.
+Access to the folder is asked for only when its row ("Allow access to music") is pressed, never at launch; the page's
+alert lines are `ui::note` rows, which the cursor and the pointer skip. The page's choices are saved per game under `<prefix>soundtrack.*`.
+
+`Item::label_fn` and `Item::edge` (`ui/menu.h`, A SCROLLING WINDOW) are what let a page show a window of a long
+list: a few fixed rows whose text follows an offset, scrolled by up / down off the window's ends.
+
 ## Building
 
 **Finding vrcore.** vrcore is its own repository, never copied into a game. A game keeps a small helper script
@@ -337,8 +362,8 @@ The head of `tools/vr_plugin_test.c` lists every `VR_TEST_*` setting. **A refact
 unchanged:** run with `VR_TEST_HASH=<prefix>` and `VR_TEST_ARGS="--replay <recording>"` before and after the change,
 and compare the hash files.
 
-The host's own device-free checks run in the sim: `--rig-test DIR`, `--audio-test DIR`, `--settings-test DIR`
-(exit 0 when everything passed). On a headset, the `tools/quest_*.sh` scripts print their usage with `--help`.
+The host's own device-free checks run in the sim: `--rig-test DIR`, `--audio-test DIR`, `--settings-test DIR`,
+`--soundtrack-test DIR` (it makes its own songs with `afconvert`; exit 0 when everything passed). On a headset, the `tools/quest_*.sh` scripts print their usage with `--help`.
 Set `VR_DRY_RUN=1` to print their adb commands with no headset.
 
 ## Changing vrcore

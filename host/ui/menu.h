@@ -51,6 +51,13 @@
  *   confirm   No / Yes; at Yes a "Confirm <label>" button appears after the value. Pointer: click it. D-pad: right
  *             again (or A) lands on it, A runs it. Leaving the row or the page puts it back to No.
  *
+ * A SCROLLING WINDOW: a page of a few fixed rows whose `label_fn` read a front's offset, with `edge` on the first
+ * and last row to move it (up / down off the window's end scrolls instead of wrapping). The page's height is its
+ * rows', so nothing resizes. The pointer does not scroll: give the page Previous / Next action rows.
+ *
+ * NOTE      A line of text that is not a control (note(): an alert, or why a list is empty). The cursor skips it and
+ *           the pointer ignores it.
+ *
  * RESTART (Menu::restart_item, the old way): the row reads No until moved to Yes, then A restarts; No again on every
  * page change. The game starts again from power-on: app.h's request_restart.
  *
@@ -86,7 +93,7 @@ struct Item;
 using Page = std::vector<Item>;
 
 // How an Item behaves under the pointer and how it is drawn (THE ROW KINDS). Legacy: built the old way.
-enum class Kind : uint8_t { Legacy, Toggle, Choice, Stepper, Action, Page, Return, Confirm };
+enum class Kind : uint8_t { Legacy, Toggle, Choice, Stepper, Action, Page, Return, Confirm, Note };
 
 struct Item {
     std::string label;
@@ -106,6 +113,13 @@ struct Item {
     std::function<void()> reset;            // Stepper: the Reset button (and A); empty: no button
     std::function<void()> run;              // Confirm: what the button does
     std::shared_ptr<bool> armed;            // Confirm: Yes (shared by the copies pages make of the item)
+    // A row whose text changes under it (a scrolling window of tracks): its label as drawn, in place of `label`,
+    // which then only sets the width reserved (SIZES) and is the row's name for the page title. Keep the text to
+    // `label`'s length: the font is fixed width, so the panel does not grow.
+    std::function<std::string()> label_fn;
+    // The d-pad moved off this row's edge, -1 up or +1 down (a window of rows that scrolls): true when the
+    // window scrolled instead, and the selection stays.
+    std::function<bool(int)> edge;
 };
 
 // The row builders. Each returns an Item to set `gap` and `help` on and push into a Page.
@@ -119,6 +133,10 @@ Item stepper(const std::string &label, std::function<float()> get, std::function
              float lo, float hi, std::function<std::string(float)> format, std::function<void()> reset = nullptr);
 Item action(const std::string &label, std::function<void()> run);
 Item page(const std::string &label, Page &sub);
+// A line of text that is not a control: an alert or an explanation (why a list is empty). The cursor skips it, the
+// pointer does not hover it, and A does nothing on it. `widest` sets the width reserved (SIZES); `text` is what is
+// drawn, kept to its length (the font is fixed width). Give it `shown` to come and go.
+Item note(const std::string &widest, std::function<std::string()> text);
 // Yes / No, and a "Confirm <label>" button at Yes that calls `run` (which closes the menu itself, if it should).
 Item confirm(const std::string &label, std::function<void()> run);
 
@@ -206,6 +224,7 @@ public:
     Item return_item();
 
 private:
+    void off_notes(int step);
     struct Line;
     void place(const Input &in);
     void build_lines(std::vector<Line> &out, bool &has_help);

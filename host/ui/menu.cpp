@@ -352,6 +352,15 @@ Item page(const std::string &label, Page &sub)
     return it;
 }
 
+Item note(const std::string &widest, std::function<std::string()> text)
+{
+    Item it;
+    it.label = widest;
+    it.kind = Kind::Note;
+    it.label_fn = std::move(text);
+    return it;
+}
+
 Item confirm(const std::string &label, std::function<void()> run)
 {
     Item it;
@@ -484,6 +493,7 @@ void Menu::update(const Tick &t, const Input &in)
     if (visible_.empty()) return;
     if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
     if (sel_ < 0) sel_ = 0;
+    off_notes(+1);
 
     // THE POINTER: hover selects the row under the ray; the trigger's edge clicks it (THE ROW KINDS)
     if (dropdown_ >= (int)visible_.size() || (dropdown_ >= 0 && visible_[dropdown_]->choices.empty())) dropdown_ = -1;
@@ -576,8 +586,9 @@ void Menu::update(const Tick &t, const Input &in)
     if (fire) {
         Item &it = *visible_[sel_];
         const bool conf = it.kind == Kind::Confirm;
-        if (dir == 1) sel_ = (sel_ + n - 1) % n;
-        if (dir == 2) sel_ = (sel_ + 1) % n;
+        const bool scrolled = (dir == 1 || dir == 2) && it.edge && it.edge(dir == 1 ? -1 : 1);
+        if (dir == 1 && !scrolled) sel_ = (sel_ + n - 1) % n, off_notes(-1);
+        if (dir == 2 && !scrolled) sel_ = (sel_ + 1) % n, off_notes(+1);
         if (dir == 3 && it.sub) enter(it);
         else if (dir == 3 && conf && armed(it)) button_focus_ = true;
         else if (dir == 3 && it.value && it.change) it.change(+1);
@@ -607,10 +618,19 @@ void Menu::update(const Tick &t, const Input &in)
             if (!it.shown || it.shown()) visible_.push_back(&it);
         if (sel_ >= (int)visible_.size()) sel_ = (int)visible_.size() - 1;
         if (sel_ >= 0 && !visible_.empty()) {
+            off_notes(+1);
             disarm(page_, visible_[sel_]);
             if (!armed(*visible_[sel_])) button_focus_ = false;
         }
     }
+}
+
+// The selection moved off a Note (text, not a control) to the next row in `step`'s direction, wrapping; it stays
+// when the page is all notes.
+void Menu::off_notes(int step)
+{
+    const int n = (int)visible_.size();
+    for (int i = 0; i < n && visible_[sel_]->kind == Kind::Note; ++i) sel_ = (sel_ + n + step) % n;
 }
 
 // ---- the picture ----
@@ -634,8 +654,9 @@ void Menu::item_segs(const Item &it, bool selected, float column, bool worst, Li
 {
     using Seg = Line::Seg;
     const float sw = font_->CalcTextSizeA(kFontPx, 1e9f, 0, " ").x;
-    const ImU32 c = selected ? kSelected : kText;
-    const std::string head = (selected ? "> " : "  ") + it.label;      // the same width: the labels stay put
+    const ImU32 c = it.kind == Kind::Note ? kNote : selected ? kSelected : kText;
+    // the same width: the labels stay put; a window's rows are measured by their `label` (worst) and drawn by label_fn
+    const std::string head = (selected ? "> " : "  ") + (!worst && it.label_fn ? it.label_fn() : it.label);
     auto glyph = [&](int g, int zone, float lead, float x = -1) {
         Seg q{"", c, false, x};
         q.glyph = g;
@@ -950,7 +971,10 @@ void Menu::point(const Input &in, bool &click)
     }
     if (hit_id_ == 0) {
         for (size_t i = 0; i < rows_.size() && i < visible_.size(); ++i)
-            if (hit_y_ >= rows_[i].y && hit_y_ < rows_[i].y + rows_[i].h) hover_row_ = (int)i;
+            // a Note is text: the ray passes over it
+            if (i < visible_.size() && visible_[i]->kind != Kind::Note && hit_y_ >= rows_[i].y &&
+                hit_y_ < rows_[i].y + rows_[i].h)
+                hover_row_ = (int)i;
     }
     click = trigger_pressed_[pointing_];
     // an open dropdown takes the ray: the rows under it are not hovered, and the selection stays

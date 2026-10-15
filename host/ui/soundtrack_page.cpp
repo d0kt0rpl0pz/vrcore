@@ -1,0 +1,490 @@
+/*
+ * soundtrack_page.cpp -- soundtrack_page.h: the saved choices, the playlist's order, and the rows over
+ * audio::soundtrack (the engine) and audio::library (the folder).
+ *
+ * THE ORDER. The engine plays a list and moves on at a track's end, wrapping. In order hands it the playlist; Shuffle
+ * a permutation made once (the chosen track first); Repeat one a list of that one track. `g.order` maps the engine's
+ * index back to the playlist's. Changing playlist, mode or track makes the list again.
+ */
+#include "soundtrack_page.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <memory>
+#include <numeric>
+#include <random>
+#include <vector>
+
+#include "../audio/library.h"
+#include "../audio/soundtrack.h"
+#include "log.h"
+#include "settings.h"
+
+namespace vrcore::ui {
+
+namespace {
+
+namespace st = settings;
+namespace lib = audio::library;
+namespace snd = audio::soundtrack;
+
+constexpr int kWindow = 10;                 // tracks a window of the Tracks page shows
+constexpr size_t kLabelChars = 44;          // a row's text (the font is fixed width: the panel does not grow)
+constexpr double kNowPlayingS = 3.0;
+enum { kInOrder = 0, kShuffle = 1, kRepeatOne = 2 };
+const char *const kModes[] = {"In order", "Shuffle", "Repeat one"};
+
+struct State {
+    SoundtrackHooks hooks;
+    bool on = false;
+    int volume = 80;
+    int mode = kShuffle;
+    bool now_playing = true;
+    std::string playlist;                   // the chosen one's name
+    std::string track;                      // the last track's file name
+
+    std::shared_ptr<const lib::Scan> scan;  // what the rows read
+    int pl = -1;                            // the chosen playlist's index in scan
+    std::vector<int> order;                 // the engine's list, as indices into the playlist
+    int cur = -1;                           // the playlist's track heard (-1 none)
+    bool started = false;                   // the engine was given a list for this on-state
+    bool suspended = false;                 // stopped for lack of focus
+    bool gave_up = false;                   // every track failed
+    bool replacing = false;                 // as last told to the front
+    bool wanted_scan = false;               // a scan is wanted once the library is not busy
+    bool tried_launch = false;
+    bool warned = false;                    // a failed start was logged
+    double retry_at = 0;                    // when a saved-on start that did not take is tried again
+    int window = 0;                         // the Tracks page's first row (a track index)
+    double now = 0, note_until = 0;
+    std::string note;
+    std::mt19937 rng{(unsigned)std::chrono::steady_clock::now().time_since_epoch().count()};
+};
+State g;
+
+// The pages the row opens: kept for the run (Item::sub points at them).
+Page g_page, g_tracks;
+Item *g_playlist_row = nullptr;
+
+std::string key(const char *name) { return std::string(g.hooks.prefix) + "soundtrack." + name; }
+
+std::string clip(const std::string &s)
+{
+    if (s.size() <= kLabelChars) return s;
+    return s.substr(0, kLabelChars - 3) + "...";
+}
+
+const lib::Playlist *playlist()
+{
+    if (!g.scan || g.pl < 0 || g.pl >= (int)g.scan->playlists.size()) return nullptr;
+    return &g.scan->playlists[g.pl];
+}
+
+int tracks() { return playlist() ? (int)playlist()->tracks.size() : 0; }
+
+bool can_play() { return g.scan && g.scan->found == lib::Found::Ok && tracks() > 0; }
+
+void update_replacing()
+{
+    bool r = g.on && !g.gave_up && (can_play() || !g.started);
+    // not yet scanned (launch): the game's music stays until the first track is known
+    if (g.on && !g.started) r = false;
+    if (r == g.replacing) return;
+    g.replacing = r;
+    if (g.hooks.options_changed) g.hooks.options_changed();
+}
+
+void apply_volume()
+{
+    snd::set_volume(g.volume, g.hooks.master_volume ? g.hooks.master_volume() : 100);
+}
+
+// The engine's list for `first` (a playlist index), and `first` played.
+void make_order(int first)
+{
+    const lib::Playlist *p = playlist();
+    if (!p || p->tracks.empty()) return;
+    const int n = (int)p->tracks.size();
+    first = std::clamp(first, 0, n - 1);
+    g.order.clear();
+    int at = first;
+    if (g.mode == kRepeatOne) {
+        g.order = {first};
+        at = 0;
+    } else {
+        g.order.resize(n);
+        std::iota(g.order.begin(), g.order.end(), 0);
+        if (g.mode == kShuffle) {
+            std::shuffle(g.order.begin(), g.order.end(), g.rng);
+            std::iter_swap(g.order.begin(), std::find(g.order.begin(), g.order.end(), first));
+            at = 0;
+        }
+    }
+    std::vector<std::string> refs;
+    for (int i : g.order) refs.push_back(p->tracks[i].ref);
+    snd::set_tracks(refs);
+    g.gave_up = false;
+    g.started = snd::play(at);
+    // not started (the audio device opens after the page's first scan at launch): begin() tries again each second,
+    // and the log says so once
+    if (g.started || !g.warned)
+        log("soundtrack: \"%s\" track %d of %d, %s: %s", p->name.c_str(), first + 1, n, kModes[g.mode],
+            g.started ? "playing" : "could not start yet (no sound device?)");
+    g.warned = !g.started;
+    g.cur = g.started ? first : -1;
+    g.suspended = false;
+    apply_volume();
+}
+
+int find_track(const std::string &file)
+{
+    const lib::Playlist *p = playlist();
+    if (!p) return -1;
+    for (size_t i = 0; i < p->tracks.size(); ++i)
+        if (p->tracks[i].file == file) return (int)i;
+    return -1;
+}
+
+// Switched on, or a scan arrived while on: begin with the saved track (a random one when shuffling and none saved).
+void begin()
+{
+    if (!g.on || !can_play() || g.started || g.suspended) return;
+    int first = find_track(g.track);
+    if (first < 0) first = g.mode == kShuffle ? (int)(g.rng() % (unsigned)tracks()) : 0;
+    make_order(first);
+    update_replacing();
+}
+
+void select_playlist_by_name()
+{
+    g.pl = -1;
+    if (!g.scan) return;
+    for (size_t i = 0; i < g.scan->playlists.size(); ++i)
+        if (g.scan->playlists[i].name == g.playlist) g.pl = (int)i;
+    // none saved (or it is gone): the files loose in the folder, else the first
+    for (size_t i = 0; g.pl < 0 && i < g.scan->playlists.size(); ++i)
+        if (g.scan->playlists[i].loose) g.pl = (int)i;
+    if (g.pl < 0 && !g.scan->playlists.empty()) g.pl = 0;
+}
+
+void stop_all()
+{
+    snd::stop();
+    g.started = false;
+    g.cur = -1;
+    g.order.clear();
+}
+
+void set_on(bool on)
+{
+    if (on == g.on) return;
+    g.on = on;
+    st::set_bool(key("on").c_str(), on);
+    if (on) {
+        g.gave_up = false;
+        lib::scan();
+        g.wanted_scan = false;
+        begin();
+    } else {
+        stop_all();
+    }
+    update_replacing();
+}
+
+void play_track(int i)
+{
+    if (!can_play()) return;
+    if (!g.on) {
+        g.on = true;
+        st::set_bool(key("on").c_str(), true);
+    }
+    make_order(i);
+    update_replacing();
+}
+
+void step(int by)
+{
+    if (!g.started || tracks() == 0) return;
+    const int n = tracks();
+    if (g.mode == kRepeatOne) {
+        play_track(((g.cur < 0 ? 0 : g.cur) + by + n) % n);
+        return;
+    }
+    snd::Status s = snd::status();
+    if (by > 0) {
+        snd::next();
+    } else if (s.tracks > 0) {
+        snd::play(((s.track < 0 ? 0 : s.track) + s.tracks - 1) % s.tracks);
+    }
+}
+
+// Each frame: which playlist track the engine is on, saved and announced when it changes.
+void poll_current()
+{
+    if (!g.started || g.suspended) return;
+    snd::Status s = snd::status();
+    if (s.tracks > 0 && s.failed >= s.tracks && !s.playing) {
+        if (!g.gave_up) log("soundtrack: none of the %d tracks could be played", s.tracks);
+        g.gave_up = true;
+        return;
+    }
+    if (s.track < 0 || s.track >= (int)g.order.size()) return;
+    int c = g.order[s.track];
+    if (c == g.cur && !g.note.empty()) return;
+    const lib::Playlist *p = playlist();
+    if (!p || c >= (int)p->tracks.size()) return;
+    const bool changed = c != g.cur;
+    g.cur = c;
+    if (changed || g.note.empty()) {
+        g.track = p->tracks[c].file;
+        st::set_string(key("track").c_str(), g.track.c_str());
+        g.note = "Now playing: " + clip(p->tracks[c].label());
+        if (g.now_playing) g.note_until = g.now + kNowPlayingS;
+    }
+}
+
+std::string status_text()
+{
+    if (lib::asking()) return "Waiting for the permission...";
+    if (lib::picking()) return "Choosing a folder...";
+    if (!g.scan) return lib::scanning() ? "Looking for songs..." : "No songs scanned yet";
+    if (lib::scanning() && g.scan->found != lib::Found::Ok) return "Looking for songs...";
+    switch (g.scan->found) {
+    case lib::Found::Ok: return g.gave_up ? "None of these tracks could be played" : "";
+    case lib::Found::NoAccess: return "The Quest's music folder cannot be read";
+    case lib::Found::PickLost: return "The chosen folder is no longer allowed";
+    case lib::Found::Missing: return "No Music/Soundtracks folder found";
+    case lib::Found::Empty: return "No songs in Music/Soundtracks";
+    case lib::Found::Unreadable: return "The music folder could not be read";
+    }
+    return "";
+}
+
+bool access_problem()
+{
+    return g.scan && (g.scan->found == lib::Found::NoAccess || g.scan->found == lib::Found::PickLost);
+}
+
+void build_pages(Menu &menu)
+{
+    g_page.clear();
+    g_tracks.clear();
+
+    Item on = toggle("Custom soundtrack", [] { return g.on; }, [](bool v) { set_on(v); });
+    on.help = "Plays your own songs from Music/Soundtracks in place of the game's music.";
+    g_page.push_back(on);
+
+    // why there is nothing to play, and what can be done
+    Item why = note(std::string(kLabelChars, 'x'), [] { return clip(status_text()); });
+    why.shown = [] { return !status_text().empty(); };
+    g_page.push_back(why);
+    Item hint = note(std::string(kLabelChars, 'x'), [] { return std::string("Copy songs there over USB; a folder makes a playlist"); });
+    hint.shown = [] { return g.scan && (g.scan->found == lib::Found::Missing || g.scan->found == lib::Found::Empty); };
+    g_page.push_back(hint);
+    Item allow = action("Allow access to music", [] {
+        lib::ask();
+    });
+    allow.shown = [] { return access_problem() && !lib::asking(); };
+    allow.help = "Lets the game read your music folder. It is asked once.";
+    g_page.push_back(allow);
+
+    const size_t pl_at = g_page.size();
+    Item pl = choice("Playlist", {"-"}, [] { return std::max(g.pl, 0); },
+                     [](int i) {
+                         if (!g.scan || i < 0 || i >= (int)g.scan->playlists.size() || i == g.pl) return;
+                         g.pl = i;
+                         g.playlist = g.scan->playlists[i].name;
+                         g.track.clear();
+                         st::set_string(key("playlist").c_str(), g.playlist.c_str());
+                         g.window = 0;
+                         if (g.on) {
+                             stop_all();
+                             begin();
+                         }
+                     });
+    // the dropdown lists the scan's names (choices, kept up to date by take_scan), so the value reads the live one
+    pl.value = [] { return playlist() ? clip(playlist()->name).substr(0, 24) : std::string("-"); };
+    pl.shown = [] { return can_play(); };
+    pl.gap = true;
+    g_page.push_back(pl);
+
+    Item tr = page("Tracks", g_tracks);
+    tr.shown = [] { return can_play(); };
+    g_page.push_back(tr);
+
+    Item mode = choice("Mode", {kModes[0], kModes[1], kModes[2]}, [] { return g.mode; },
+                       [](int m) {
+                           g.mode = m;
+                           st::set_int(key("mode").c_str(), m);
+                           if (g.on && g.started && g.cur >= 0) make_order(g.cur);
+                       });
+    mode.shown = [] { return can_play(); };
+    mode.help = "Shuffle plays every track once, in a random order, before any repeats.";
+    g_page.push_back(mode);
+    Item next = action("Next", [] { step(1); });
+    next.shown = [] { return can_play() && g.started; };
+    next.gap = true;
+    g_page.push_back(next);
+    Item prev = action("Previous", [] { step(-1); });
+    prev.shown = [] { return can_play() && g.started; };
+    g_page.push_back(prev);
+
+    Item vol = stepper("Volume", [] { return (float)g.volume; },
+                       [](float v) {
+                           g.volume = (int)std::lround(v);
+                           st::set_int(key("volume").c_str(), g.volume);
+                           apply_volume();
+                       },
+                       5.f, 0.f, 100.f, [](float v) { return std::to_string((int)std::lround(v)) + "%"; });
+    vol.gap = true;
+    g_page.push_back(vol);
+    g_page.push_back(toggle("Now playing", [] { return g.now_playing; }, [](bool v) {
+        g.now_playing = v;
+        st::set_bool(key("nowplaying").c_str(), v);
+    }));
+    g_page.back().help = "Shows the song's name for a few seconds when it changes.";
+    g_page.push_back(menu.return_item());
+    g_page.back().gap = true;
+    g_playlist_row = &g_page[pl_at];
+
+    // the Tracks window
+    Item up = action("Earlier tracks", [] { g.window = std::max(0, g.window - kWindow); });
+    up.shown = [] { return g.window > 0; };
+    g_tracks.push_back(up);
+    for (int r = 0; r < kWindow; ++r) {
+        Item row;
+        row.label = std::string(kLabelChars + 4, 'x');
+        row.label_fn = [r] {
+            const lib::Playlist *p = playlist();
+            const int i = g.window + r;
+            if (!p || i >= (int)p->tracks.size()) return std::string();
+            char num[16];
+            std::snprintf(num, sizeof num, "%3d. ", i + 1);
+            return std::string(i == g.cur ? "* " : "  ") + num + clip(p->tracks[i].label()).substr(0, kLabelChars - 2);
+        };
+        row.press = [r] { play_track(g.window + r); };
+        row.shown = [r] { return g.window + r < tracks(); };
+        if (r == 0)
+            row.edge = [](int d) {
+                if (d < 0 && g.window > 0) return --g.window, true;
+                return false;
+            };
+        if (r == kWindow - 1)
+            row.edge = [](int d) {
+                if (d > 0 && g.window + kWindow < tracks()) return ++g.window, true;
+                return false;
+            };
+        g_tracks.push_back(row);
+    }
+    Item down = action("Later tracks", [] { g.window = std::min(g.window + kWindow, std::max(0, tracks() - kWindow)); });
+    down.shown = [] { return g.window + kWindow < tracks(); };
+    g_tracks.push_back(down);
+    Item count;
+    count.label = std::string(24, 'x');
+    count.label_fn = [] {
+        const int n = tracks();
+        return "Showing " + std::to_string(std::min(n, g.window + 1)) + "-" +
+               std::to_string(std::min(n, g.window + kWindow)) + " of " + std::to_string(n);
+    };
+    count.gap = true;
+    g_tracks.push_back(count);
+    g_tracks.push_back(menu.return_item());
+}
+
+void take_scan()
+{
+    std::shared_ptr<const lib::Scan> s = lib::last();
+    if (s == g.scan) return;
+    g.scan = s;
+    select_playlist_by_name();
+    if (g_playlist_row) {
+        g_playlist_row->choices.clear();
+        if (g.scan)
+            for (const lib::Playlist &p : g.scan->playlists) g_playlist_row->choices.push_back(clip(p.name).substr(0, 24));
+        if (g_playlist_row->choices.empty()) g_playlist_row->choices.push_back("-");
+    }
+    const int n = tracks();
+    if (g.window >= n) g.window = std::max(0, n - kWindow);
+    if (g.started && g.cur >= n) stop_all();
+    begin();
+    update_replacing();
+}
+
+}
+
+void soundtrack_load(const SoundtrackHooks &hooks)
+{
+    g.hooks = hooks;
+    g.on = st::get_bool(key("on").c_str(), false);
+    g.volume = std::clamp(st::get_int(key("volume").c_str(), 80), 0, 100);
+    g.mode = std::clamp(st::get_int(key("mode").c_str(), kShuffle), 0, 2);
+    g.now_playing = st::get_bool(key("nowplaying").c_str(), true);
+    g.playlist = st::get_string(key("playlist").c_str(), "");
+    g.track = st::get_string(key("track").c_str(), "");
+}
+
+Item soundtrack_item(Menu &menu, const char *label)
+{
+    build_pages(menu);
+    return page(label, g_page);
+}
+
+void soundtrack_menu_opened()
+{
+    // scanned each time the menu opens, but only a way in that is already there: the permission is asked for by
+    // its row, never here
+    if (lib::scan()) g.wanted_scan = false;
+    else g.wanted_scan = true;
+    const int c = g.cur >= 0 ? g.cur : 0;
+    g.window = std::max(0, c - kWindow / 2);
+}
+
+bool soundtrack_replacing() { return g.replacing; }
+
+void soundtrack_update(Menu &menu, const Tick &t, const Input &in)
+{
+    g.now = (double)t.display_ns * 1e-9;
+
+    // at launch: a saved-on soundtrack is scanned for, once, when the folder can be read without asking
+    if (!g.tried_launch) {
+        g.tried_launch = true;
+        if (g.on) lib::scan();
+    }
+    if (menu.is_open() || lib::asking() || lib::picking() || lib::scanning()) lib::update();
+    if (g.wanted_scan && lib::scan()) g.wanted_scan = false;
+    take_scan();
+    // saved on: the first scan can end before the audio device is open (play fails); try again each second
+    if (g.on && !g.started && !g.suspended && !g.gave_up && can_play() && g.now >= g.retry_at) {
+        g.retry_at = g.now + 1.0;
+        begin();
+    }
+
+    // the headset's focus: stopped without it, the track from its start with it
+    if (!t.focused && g.started && !g.suspended) {
+        snd::stop();
+        g.suspended = true;
+    } else if (t.focused && g.suspended) {
+        g.suspended = false;
+        if (g.on && can_play()) make_order(g.cur >= 0 ? g.cur : 0);
+    }
+
+    apply_volume();
+    poll_current();
+    update_replacing();
+
+    if (g.now < g.note_until && !g.note.empty() && !menu.is_open()) {
+        const Quat &q = in.head.rot;
+        // forward on the floor plane: -z turned by the head's rotation
+        float fx = 2.f * (q.x * q.z + q.w * q.y) * -1.f, fz = -(1.f - 2.f * (q.x * q.x + q.y * q.y));
+        float len = std::sqrt(fx * fx + fz * fz);
+        if (len < 1e-4f) { fx = 0; fz = -1; len = 1; }
+        fx /= len;
+        fz /= len;
+        const float pos[3] = {in.head.pos[0] + fx * 1.0f, in.head.pos[1] - 0.32f, in.head.pos[2] + fz * 1.0f};
+        const float yaw = std::atan2(-fx, -fz);
+        menu.note(g.note, pos, Quat{0.f, std::sin(yaw * 0.5f), 0.f, std::cos(yaw * 0.5f)}, 0.045f);
+    }
+}
+
+}

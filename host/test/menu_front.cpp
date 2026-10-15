@@ -31,6 +31,7 @@
 #include "../gpu/render.h"
 #include "../ui/graphics.h"
 #include "../ui/menu.h"
+#include "../ui/soundtrack_page.h"
 
 namespace vrcore {
 
@@ -252,6 +253,7 @@ void build_pages(Pages &p, const Options &o)
     p.top.push_back(ui::action("Resume", [] { front.menu.close(); }));
     p.top.push_back(ui::page("Graphics", p.graphics));
     p.top.push_back(ui::page("Audio", p.audio));
+    p.top.push_back(ui::soundtrack_item(front.menu));
     p.top.push_back(ui::page("UI", p.ui));
     p.top.push_back(ui::page("Comfort", p.comfort));
     p.top.push_back(ui::page("Gameplay", p.gameplay));
@@ -311,6 +313,11 @@ void front_load_settings(Options &o)
 {
     st::open("vrcore", "menu-sample");
     ui::graphics_load(graphics_hooks(), o);
+    ui::SoundtrackHooks sh;
+    sh.prefix = "ms.";
+    sh.options_changed = [] { log("menu sample: the game's music is %s", ui::soundtrack_replacing() ? "replaced (0)" : "back"); };
+    sh.master_volume = [] { return args.volume; };
+    ui::soundtrack_load(sh);
     args.draw = clampi(st::get_int("ms.draw", 7), 0, 10);
     args.volume = clampi(st::get_int("ms.volume", 100), 0, 100);
     args.music = clampi(st::get_int("ms.music", 100), 0, 100);
@@ -339,6 +346,7 @@ bool front_init(gpu::Renderer &r, const Options &o)
     ui::Hooks h;
     h.legend = []() -> const Legend * { return &kControls; };
     h.version = "sample";
+    h.on_open = [] { ui::soundtrack_menu_opened(); };
     std::vector<ui::Box> boxes = {make_box(true, {kLeftLines, 4}), make_box(false, {kRightLines, 3})};
     bool ok = front.menu.init(r, h, boxes);
     front.pages = new Pages;
@@ -357,6 +365,7 @@ void front_update(const Tick &t)
             log("menu: no page starting with \"%s\"", front.start_page.c_str());
     }
     front.menu.update(t, in);
+    ui::soundtrack_update(front.menu, t, in);
 }
 
 void front_prepare(gpu::Frame &f)
