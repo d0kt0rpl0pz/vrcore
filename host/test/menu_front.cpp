@@ -7,14 +7,22 @@
  * THE ROWS. One of each kind (ui/menu.h THE ROW KINDS), through the builders: toggle, choice, stepper (a percentage,
  * tenths), stepper with a reset, action, page, Return and confirm (the top page's Restart). Two stay the old way, as
  * a front that has not moved over yet: the Graphics profile rows (ui/graphics.h) and the Gameplay page's
- * "Restart game" (Menu::restart_item), so both can be seen to look and navigate as ever.
+ * "Restart game" (Menu::restart_item), so both can be seen to look and navigate as ever. Also shown:
+ * cards (menu.h CARDS): every page is grouped, titled by `group` (Graphics' PROFILE card comes from ui/graphics.h and
+ * shows the profile), the top page's by gaps alone, untitled, and the Return row under the cards; Graphics' PICTURE
+ * card starts on Sharpening where the headset offers it, else on Glass shader. A toggle with its own texts
+ * (Gameplay's Mode, "Full" / "Arcade", drawn "current / other"); a toggle whose value the front replaces (Traffic,
+ * which adds " (Requires Restart)" once changed, `reserve` and Hooks::value_reserve keeping the room); and a Note
+ * (the UI page's, shown while the HUD is off, which the cursor skips).
  *
  * THE CONTROLLERS. The menu draws them itself (ui/controllers.h): a controller and its ray for each hand the rule
  * shows (input.h LAST DEVICE: tracked, and newer than the last pad or key press), so there is nothing here to draw.
  * In the sim the mouse is the right controller (sim/sim.cpp).
  *
- * --menu opens the menu at the start (a headless --shot of it); --page NAME opens it on that sub page. Nothing is a game's: the choices are saved under
- * the keys `ms.` in a settings file of their own.
+ * --menu opens the menu at the start (a headless --shot of it); --page NAME opens it on that sub page; --message shows
+ * the "could not start" panel instead (menu.h THE MESSAGE PANEL): a two line text and the picker's row, which a
+ * select press (Enter, A) answers with a line in the note colour. Nothing is a game's:
+ * the choices are saved under the keys `ms.` in a settings file of their own.
  */
 #include <cmath>
 #include <cstdint>
@@ -44,7 +52,7 @@ using ui::Page;
 
 // the choices, as a game's front keeps its Args
 struct Args {
-    bool free_play = true, glass = true, hud = true, fps = false;
+    bool free_play = true, glass = true, hud = true, fps = false, full_mode = true, traffic = true;
     int car_detail = 2, difficulty = 1, country = 0;
     int volume = 100, music = 100, effects = 100;
     int draw = 7;
@@ -63,6 +71,8 @@ struct Front {
     Options options;
     bool open_at_start = false;
     std::string start_page;                 // --page: a sub page entered as the menu opens
+    bool message = false;                   // --message: the message panel in place of the menu
+    bool picked = false;                    // ... and the picker's row has been pressed
 } front;
 
 const char *const kDifficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
@@ -92,6 +102,20 @@ std::string fmt(const char *f, double v)
     char b[64];
     std::snprintf(b, sizeof b, f, v);
     return b;
+}
+
+// a row that starts a card with that title (menu.h CARDS)
+Item titled(Item it, const char *group)
+{
+    it.group = group;
+    return it;
+}
+
+// a row that starts an untitled card
+Item gapped(Item it)
+{
+    it.gap = true;
+    return it;
 }
 
 // a builder's row with its help and gap
@@ -179,7 +203,7 @@ void build_pages(Pages &p, const Options &o)
     // Graphics
     ui::GraphicsRows rows = ui::graphics_rows(o);
     for (const Item &it : rows.profile) p.graphics.push_back(it);
-    p.graphics.push_back(with(
+    p.graphics.push_back(titled(with(
         ui::stepper(
             "Draw distance",
             [] {
@@ -193,29 +217,40 @@ void build_pages(Pages &p, const Options &o)
                 ui::graphics_by_hand();
             },
             1.f, 0.f, (float)(kDrawCount - 1), [](float v) { return draw_name(kDraws[clampi((int)v, 0, kDrawCount - 1)]); }),
-        "How far the scenery is drawn. Medium cost."));
+        "How far the scenery is drawn. Medium cost."), "RENDERING"));
     p.graphics.push_back(option("Car detail", {"Low", "Medium", "High"}, args.car_detail, "ms.cardetail",
                                 "Models in the distance."));
-    p.graphics.push_back(rows.sharpen);
-    p.graphics.push_back(flag("Glass shader", args.glass, "ms.glass", "A depth texture on glass.", !rows.sharpen_shown));
-    p.graphics.push_back(tenths("Gamma", args.gamma, "ms.gamma", 0.7f, 1.5f, "Brightens or darkens the middle tones.", true));
+    // PICTURE starts on whichever of Sharpening (some headsets only) and Glass shader is shown first; the other must
+    // not start a card of its own
+    Item sharpen = rows.sharpen;
+    sharpen.gap = false;
+    if (rows.sharpen_shown) sharpen.group = "PICTURE";
+    p.graphics.push_back(sharpen);
+    Item glass = flag("Glass shader", args.glass, "ms.glass", "A depth texture on glass.");
+    if (!rows.sharpen_shown) glass.group = "PICTURE";
+    p.graphics.push_back(glass);
+    p.graphics.push_back(tenths("Gamma", args.gamma, "ms.gamma", 0.7f, 1.5f, "Brightens or darkens the middle tones.", false));
     p.graphics.push_back(tenths("Brightness", args.brightness, "ms.brightness", 0.5f, 1.5f, "Scales every colour.", false));
-    p.graphics.push_back(flag("FPS counter", args.fps, "ms.fps", "Over the HUD.", true));
+    p.graphics.push_back(titled(flag("FPS counter", args.fps, "ms.fps", "Over the HUD."), "OVERLAY"));
 
     // Audio
-    p.audio.push_back(level("Volume", args.volume, "ms.volume"));
+    p.audio.push_back(titled(level("Volume", args.volume, "ms.volume"), "LEVELS"));
     p.audio.push_back(level("Music", args.music, "ms.music"));
     p.audio.push_back(level("Sound Effects", args.effects, "ms.effects"));
 
     // UI
-    p.ui.push_back(flag("HUD", args.hud, "ms.hud"));
+    p.ui.push_back(titled(flag("HUD", args.hud, "ms.hud"), "DISPLAY"));
+    // a Note: not a control, shown only while the HUD is off (the cursor skips it)
+    Item hud_note = ui::note("The HUD is hidden in the race.", [] { return std::string("The HUD is hidden in the race."); });
+    hud_note.shown = [] { return !args.hud; };
+    p.ui.push_back(hud_note);
     p.ui.push_back(ui::action("Reset to default", [] {
         args.hud = true;
         st::set_bool("ms.hud", true);
     }));
 
     // Comfort: steppers with a Reset
-    p.comfort.push_back(with(ui::stepper(
+    p.comfort.push_back(titled(with(ui::stepper(
         "World scale", [] { return args.scale; },
         [](float v) {
             args.scale = v;
@@ -226,7 +261,7 @@ void build_pages(Pages &p, const Options &o)
             args.scale = 1.f;
             st::set_float("ms.scale", 1.f);
         }),
-        "Left or right changes it; A resets it."));
+        "Left or right changes it; A resets it."), "VIEW"));
     p.comfort.push_back(with(ui::stepper(
         "Dashboard view offset", [] { return (float)args.dash_cm; },
         [](float v) {
@@ -242,22 +277,39 @@ void build_pages(Pages &p, const Options &o)
         "Moves the view along the car. Left or right changes it; A resets it."));
 
     // Gameplay
-    p.gameplay.push_back(flag("Free play", args.free_play, "ms.freeplay"));
+    p.gameplay.push_back(titled(flag("Free play", args.free_play, "ms.freeplay"), "RULES"));
+    // a toggle with its own texts, drawn "current / other"
+    p.gameplay.push_back(ui::toggle(
+        "Mode", [] { return args.full_mode; },
+        [](bool v) {
+            args.full_mode = v;
+            st::set_bool("ms.fullmode", v);
+        },
+        "Full", "Arcade"));
     p.gameplay.push_back(option("Difficulty", {kDifficulty[0], kDifficulty[1], kDifficulty[2], kDifficulty[3]},
                                 args.difficulty, "ms.difficulty"));
     p.gameplay.push_back(option("Country", {kCountry[0], kCountry[1], kCountry[2]}, args.country, "ms.country"));
-    p.gameplay.push_back(front.menu.restart_item(nullptr));
+    // a toggle whose value the front replaces, as a real front does for a "(Requires Restart)" note: the value reads
+    // alone, and `reserve` keeps room for the note (Hooks::value_reserve)
+    const bool traffic_at_start = args.traffic;
+    Item traffic = flag("Traffic", args.traffic, "ms.traffic");
+    traffic.reserve = true;
+    traffic.value = [traffic_at_start] {
+        return std::string(args.traffic ? "On" : "Off") + (args.traffic != traffic_at_start ? " (Requires Restart)" : "");
+    };
+    p.gameplay.push_back(traffic);
+    p.gameplay.push_back(front.menu.restart_item(nullptr, true));
 
     for (Page *pg : {&p.graphics, &p.audio, &p.ui, &p.comfort, &p.gameplay}) pg->push_back(front.menu.return_item());
 
     p.top.push_back(ui::action("Resume", [] { front.menu.close(); }));
-    p.top.push_back(ui::page("Graphics", p.graphics));
+    p.top.push_back(gapped(ui::page("Graphics", p.graphics)));
     p.top.push_back(ui::page("Audio", p.audio));
     p.top.push_back(ui::soundtrack_item(front.menu));
     p.top.push_back(ui::page("UI", p.ui));
     p.top.push_back(ui::page("Comfort", p.comfort));
     p.top.push_back(ui::page("Gameplay", p.gameplay));
-    p.top.push_back(ui::action("Recenter", [] { front.menu.close(); }));
+    p.top.push_back(gapped(ui::action("Recenter", [] { front.menu.close(); })));
     p.top.push_back(with(ui::confirm("Restart",
                                      [] {
                                          front.menu.close();
@@ -301,6 +353,10 @@ int front_option(int argc, char **argv, int i)
         front.open_at_start = true;
         return 1;
     }
+    if (a == "--message") {
+        front.message = true;
+        return 1;
+    }
     if (a == "--page" && i + 1 < argc) {
         front.open_at_start = true;
         front.start_page = argv[i + 1];
@@ -332,6 +388,8 @@ void front_load_settings(Options &o)
     args.free_play = st::get_bool("ms.freeplay", true);
     args.glass = st::get_bool("ms.glass", true);
     args.hud = st::get_bool("ms.hud", true);
+    args.full_mode = st::get_bool("ms.fullmode", true);
+    args.traffic = st::get_bool("ms.traffic", true);
     args.fps = st::get_bool("ms.fps", false);
 }
 
@@ -346,7 +404,17 @@ bool front_init(gpu::Renderer &r, const Options &o)
     ui::Hooks h;
     h.legend = []() -> const Legend * { return &kControls; };
     h.version = "sample";
+    h.value_reserve = " (Requires Restart)";
     h.on_open = [] { ui::soundtrack_menu_opened(); };
+    if (front.message) {
+        h.message = [] { return std::string("The game's files were not found.\nPut them in the folder below, or pick another."); };
+        h.pick = [](bool select) {
+            front.picked |= select;
+            std::string l = "\x01" "Folder  games/sample";
+            if (front.picked) l += "\n\x02" "That folder has no game files.";
+            return l;
+        };
+    }
     std::vector<ui::Box> boxes = {make_box(true, {kLeftLines, 4}), make_box(false, {kRightLines, 3})};
     bool ok = front.menu.init(r, h, boxes);
     front.pages = new Pages;

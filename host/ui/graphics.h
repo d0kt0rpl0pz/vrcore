@@ -70,7 +70,8 @@ GraphicsStart graphics_start(const Headset &h, Options &o);
 // The rows, made when the menu's pages are (after graphics_load): `o` the graphics in force (the launch's, flags
 // applied; after a restart the host's, with the profile the player saved since). `profile`:
 // Graphics profile, Refresh rate, Eye resolution, Foveated rendering; `sharpen`: Sharpening, with a gap above it
-// and shown only where the headset offers it (`sharpen_shown`).
+// and shown only where the headset offers it (`sharpen_shown`). The first profile row starts a PROFILE card whose
+// title shows the current profile.
 struct GraphicsRows {
     Page profile;
     Item sharpen;

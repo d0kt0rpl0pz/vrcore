@@ -44,7 +44,7 @@ struct Push {
 };
 
 const float kRayWidth = 0.003f;
-const float kWhite[4] = {1, 1, 1, 1}, kYellow[4] = {1, 0.85f, 0.1f, 1};
+const float kWhite[4] = {1, 1, 1, 1};
 
 // A unit cube about the origin, zero normals (unlit): the ray's beam.
 std::vector<Vertex> cube_mesh()
@@ -188,6 +188,16 @@ void ControllerModels::set_profile(gpu::Renderer &r, int hand, const char *profi
     slot_[hand] = pick;
     const bool ok = load(r, asset_path(file).c_str(), c.model);
     log("ui: %s hand profile \"%s\": %s (%s)", hand ? "right" : "left", profile, file, ok ? "loaded" : "not drawn");
+}
+
+// The shaders' colours are linear and the overlay's target is sRGB (it encodes), so the key's bytes are decoded here.
+void ControllerModels::set_ray_hot(uint32_t rgb)
+{
+    for (int k = 0; k < 3; ++k) {
+        const float v = (float)((rgb >> (16 - 8 * k)) & 0xFF) / 255.f;
+        hot_[k] = v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+    }
+    hot_[3] = 1;
 }
 
 void ControllerModels::tick(gpu::Renderer &r)
@@ -408,7 +418,7 @@ void ControllerModels::draw(gpu::Frame &f, const Draw hands[2]) const
         mm = mat4_mul(mm, mat4_translate(0, 0, -d.ray_length / 2));
         Push p;
         p.model = mat4_mul(mm, mat4_scale(kRayWidth, kRayWidth, d.ray_length));
-        const float *c = d.clickable ? kYellow : kWhite;
+        const float *c = d.clickable ? hot_ : kWhite;
         for (int k = 0; k < 4; ++k) p.color[k] = c[k];
         f.bind(pipe_);
         f.bind_vertices(cube_);

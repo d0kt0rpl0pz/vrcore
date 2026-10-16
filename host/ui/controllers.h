@@ -16,7 +16,8 @@
  * texture where the material has one. A texture is a KTX2 file (ASTC, gpu/ktx2.h) that the glTF image's `uri`
  * names, beside the GLB (assets/controllers/); it is sampled repeating, since Index's UVs run outside 0..1. No
  * ASTC on the device, or a file that does not load: the part is drawn in its factor alone.
- * THE RAY: a thin white box from the aim along -z, yellow over something clickable.
+ * THE RAY: a thin white box from the aim along -z, in the menu's key colour over something clickable
+ * (set_ray_hot: the sRGB colour, converted to the linear one the shaders take; the overlay is an sRGB target).
  */
 #pragma once
 
@@ -47,6 +48,7 @@ public:
     // The profile now on a hand ("oculus/touch_controller"; "" none): its model, from the cache or loaded (THE
     // MODELS). The same profile again does nothing. Logged.
     void set_profile(gpu::Renderer &r, int hand, const char *profile);
+    void set_ray_hot(uint32_t rgb);                 // the ray's colour over something clickable, 0xRRGGBB (sRGB)
     void tick(gpu::Renderer &r);                    // once a frame: retired models past their wait are freed
     void shutdown(gpu::Renderer &r);
     bool ready() const { return pipe_ != nullptr; }
@@ -82,6 +84,7 @@ private:
     Cached cache_[kCache];
     int slot_[2] = {-1, -1};                        // each hand's model in cache_ (-1 none yet)
     uint64_t uses_ = 0;
+    float hot_[4] = {1, 0.85f, 0.1f, 1};            // the ray over something clickable (linear)
     std::string profile_[2];
     bool loaded_[2] = {false, false};
     std::vector<Retired> retired_;

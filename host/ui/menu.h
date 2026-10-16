@@ -9,26 +9,35 @@
  *   back         B / Backspace / gamepad B (or the Return row)
  *
  * THE PICTURE. Each box is its own quad layer (app/layers.h: the compositor draws it, so it costs the eye pass
- * nothing), drawn with Dear ImGui (ui/imgui_render) in ImGui's built-in font, ProggyClean, baked at the pixel
- * size it is drawn at. Sizes: capitals 30 mm, line pitch 52.6 mm. ProggyClean's capitals are
- * 0.69 of its size, so its size is 43.5 mm, at kPxPerM pixels a metre. All of it is
- * drawn at 40/48 of that (menu.cpp kSize: too wide otherwise in ProggyClean's wide letters).
+ * nothing), drawn with Dear ImGui (ui/imgui_render) in the theme's two faces: a condensed label face for names and
+ * titles, a monospace value face for values, help and hints, each baked at every pixel size it is drawn at. The panel
+ * is laid out in "comp px", the units of the design comps (a 38 px row): menu.cpp kC is layer pixels a comp px, so the
+ * row pitch of 52.6 mm * 40/48 at kPxPerM pixels a metre is 38 comp px and every other size scales from it (menu.cpp
+ * has them all in one block). The panel is a dark ground with a thin border: the header ("TOP > PAGE" in the heading
+ * colour and white, the version at its right), then the cards (CARDS), the Return row, the selected row's help
+ * under a rule, and a one line hint of the controls. The selected row is a solid bar in the key colour, everything
+ * on it in black or white, whichever reads better on the key.
  *
  * PLACEMENT: on opening, 1.1 m ahead of the head, level (its yaw alone), 5 cm under the eyes,
  * facing you; the boxes hinged 3 cm off the panel's edges, turned 30 degrees in towards you, centred on its
- * middle's height. A box is sized to its text on every draw; the panel's width only grows while on one page, and
- * its height is held on a page with help (HELP), so the box does not jump as the selection moves.
+ * middle's height. The other boxes are sized to their text on every draw.
  *
  * SIZES (the user: nothing may resize while you change a row): on opening, the panel's width is the widest any page
- * can be (every row shown, a value marked `reserve` with Hooks::value_reserve after it), the same on every page; on entering a page,
- * its height has room for every row, hidden ones too, and its longest help. Both only grow after that, should a
- * value outgrow its reserve.
+ * can be (every row shown, a value marked `reserve` with Hooks::value_reserve after it, a choice's longest label,
+ * a stepper's widest value, the hint at its longest), the same on every page; on entering a page, its height has
+ * room for every row, hidden ones too, a dropdown at its lowest, and its longest help. One layout pass (menu.cpp
+ * Plan) gives the measure (every row) and the draw (the shown rows) their positions, so they cannot disagree.
+ * Both only grow after that, should a value outgrow its reserve.
  *
- * HELP and VERSION: the selected item's help under the page, three quarters the size, dimmer, wrapped
- * to the menu's width, with room kept for the page's longest; "v" + version in the top right margin.
+ * HELP and VERSION: the selected item's help under the cards, wrapped to the panel's inner width, with room kept
+ * for the page's longest, and it and the hint pinned at the panel's bottom, not right
+ * under the shown rows; "v" + version at the header's right.
  *
  * THE MESSAGE PANEL: while Hooks::message gives a text (the game could not start), the panel shows it in place
- * of the menu, with the pick hook's lines under it (the file picker's row), and no boxes beside.
+ * of the menu, in the same style (the header, then a row a line), with the pick hook's lines under it (the file
+ * picker's row as a selected row), and no boxes beside. The pointer works there too: the ray hits the \x01 row's
+ * rectangle (the one Menu::draw_message draws), the trigger's edge on it picks as A does, and the ray and dot turn
+ * the key colour over it; the rest of the panel stops the ray but is not clickable.
  *
  * THE POINTER. While Input::controller_shown, the right hand's aim ray (the left's only while the right is not
  * tracked) is cast at the panel and the boxes' quads (the room's, as prepare placed them). Hovering a row selects it
@@ -41,7 +50,9 @@
  * always did, and the pointer's click on it is A. The builders below set a kind (and its data) on top of the same
  * value / change / press / sub fields, so the d-pad, stick, keyboard and A / B do exactly what they did for every
  * kind; only the pointer and the picture differ:
- *   toggle    a click anywhere on the row flips it
+ *   toggle    a click anywhere on the row flips it. It keeps both texts (`choices` = {on, off}, `index` 0 on / 1 off) so
+ *             it can be drawn "current / other"; a front that replaces its `value` gets that value drawn alone.
+ *             Only a Choice opens a dropdown: `choices` alone does not make one.
  *   choice    `v` beside the value; a click opens a dropdown under it (pointer only; the d-pad cycles as before);
  *             click a choice, or outside, or B, to leave it. The room for the list is reserved when the page is
  *             entered (SIZES), the list hangs over the rows below it.
@@ -50,6 +61,11 @@
  *   action    a click runs it         page   `>` at the end, a click enters it         return   a click is B
  *   confirm   No / Yes; at Yes a "Confirm <label>" button appears after the value. Pointer: click it. D-pad: right
  *             again (or A) lands on it, A runs it. Leaving the row or the page puts it back to No.
+ *
+ * CARDS. A page's rows are grouped into cards: one starts at the first row and at every row with a `gap` or a `group`.
+ * Its title strip reads `group` (and `group_value` after it); a gap alone gives an untitled card. The Return row sits
+ * under the cards, outside them. A card whose rows are all hidden is not drawn, but its height is kept (SIZES).
+ * In a row the label column is as wide as the page's widest label that has a control, and the controls start after it.
  *
  * A SCROLLING WINDOW: a page of a few fixed rows whose `label_fn` read a front's offset, with `edge` on the first
  * and last row to move it (up / down off the window's end scrolls instead of wrapping). The page's height is its
@@ -89,6 +105,13 @@ struct Layer;
 
 namespace vrcore::ui {
 
+// A face at one baked size; `fake`: no bold file loaded, so a bold use draws the regular twice.
+struct UiFont {
+    ImFont *f = nullptr;
+    float px = 0;
+    bool fake = false;
+};
+
 struct Item;
 using Page = std::vector<Item>;
 
@@ -120,6 +143,13 @@ struct Item {
     // The d-pad moved off this row's edge, -1 up or +1 down (a window of rows that scrolls): true when the
     // window scrolled instead, and the selection stays.
     std::function<bool(int)> edge;
+    // CARDS: this row starts a card with that title (the drawing upper-cases it). A `gap` without a group starts an
+    // untitled card; the page's first row starts one too.
+    const char *group = nullptr;
+    // Optional: drawn after " · " in the heading colour in the card's title ("PROFILE · FIDELITY"). Read every frame.
+    std::function<std::string()> group_value;
+    // Stepper: the widest text its format gives over lo..hi (stepper() fills it), so the value's slot keeps its width.
+    std::string widest_value;
 };
 
 // The row builders. Each returns an Item to set `gap` and `help` on and push into a Page.
@@ -142,7 +172,7 @@ Item confirm(const std::string &label, std::function<void()> run);
 
 
 // A front's box beside the panel (Daytona's records), drawn on the menu's
-// background with the menu's margin round it. The boxes of a side run outwards in the order given, each kHinge
+// background and border with the menu's margin round it. The boxes of a side run outwards in the order given, each kHinge
 // (3 cm) past the last, the row curving round you: the first turned 30 degrees in (PLACEMENT), each further stretch
 // (a box, or a box's gap) 30 more. The right side's start after CONTROLS.
 struct Box {
@@ -162,16 +192,29 @@ struct Box {
 
 using Legend = std::vector<std::pair<std::string, std::string>>;    // { button, what it does }
 
+// The menu's faces and two colours (host-side C++, not the plugin ABI). Fonts are TTF files under the assets, read at
+// init; a file that fails to load falls back to the default, and that to ImGui's built-in face.
+struct Theme {
+    std::string label_font;       // a TTF under the assets (fonts/...), the regular weight; empty: fonts/BarlowCondensed-Medium.ttf
+    std::string label_bold_font;  // the bold weight of the same family; empty: fonts/BarlowCondensed-SemiBold.ttf when label_font is empty, else the regular
+    std::string value_font;       // empty: fonts/IBMPlexMono-Regular.ttf
+    std::string value_bold_font;  // empty: fonts/IBMPlexMono-SemiBold.ttf when value_font is empty, else the regular
+    uint32_t key = 0;             // the selected row, the hot arrow, a dropdown's edge, 0xRRGGBB; 0: #FFC21A
+    uint32_t heading = 0;         // title, card values, CONTROLS heading, toggle squares, 0xRRGGBB; 0: #8CFFCC
+};
+
 struct Hooks {
     std::function<bool()> can_open;         // empty: always
     std::function<void()> on_open;          // the game pauses and gives up its controls
     std::function<void()> on_close;
     std::function<std::string()> message;   // the "could not start" text; empty: none (the menu as usual)
     // The message panel's extra lines (the picker's row) and what A / Enter does to it: called every frame while a
-    // message shows, `select` true on the press. Empty: none. A line starting with \x01 is drawn yellow (the row),
-    // \x02 red (why the last pick did not work).
+    // message shows, `select` true on the press (A, Enter, or the trigger's edge with the ray on the \x01 row).
+    // Empty: none. A line starting with \x01 is drawn as a selected row (the key bar), \x02 in the note colour (why
+    // the last pick did not work).
     std::function<std::string(bool select)> pick;
     std::function<const Legend *()> legend; // the CONTROLS box's rows; another pointer redraws it. Empty: no box
+    Theme theme;                            // the faces and the key / heading colours, read at init
     std::string version;                    // "v" + this in the top right corner; empty: none
     std::string value_reserve;              // what a value may gain (the front's " (Requires Restart)"): SIZES
 #ifdef __ANDROID__
@@ -226,25 +269,28 @@ public:
 private:
     void off_notes(int step);
     bool list_visible();
-    struct Line;
+    struct Plan;
+    struct RowRect;
+    struct Ctl;
     void place(const Input &in);
-    void build_lines(std::vector<Line> &out, bool &has_help);
-    void build_message(std::vector<Line> &out);
-    void draw_panel(ImDrawList *dl, float ox, float oy, const std::vector<Line> &lines, float w, float h);
-    float layout(const Line &l, std::vector<float> *xs = nullptr) const;
-    void item_segs(const Item &it, bool selected, float column, bool worst, Line &l) const;
+    // `help_rows` >= 0: the help room already measured (the draw), else wrapped from the page's helps (the measure)
+    Plan make_plan(const Page &p, const std::function<bool(const Item &)> &counts, bool worst, int help_rows = -1) const;
+    float control(const Item &it, bool worst, float x, float cy, const Ctl *d, RowRect *rr) const;
+    float header_width(const std::string &page) const;
+    void draw_panel(ImDrawList *dl, float ox, const Plan &plan, float w, float h);
+    void draw_header(ImDrawList *dl, float in0, float in1, const std::string &page) const;
+    void draw_message(ImDrawList *dl, float ox, const std::vector<std::pair<std::string, char>> &lines, float w, float h);
     void disarm(Page *p, const Item *except = nullptr);
     void run_confirm(Item &it);
     bool armed(const Item &it) const { return it.armed && *it.armed; }
     std::vector<std::string> wrap_help(const char *text, float width) const;
-    float value_column(const Page &p) const;
     float widest() const;
-    float tallest(const Page &p) const;
     void point(const Input &in, bool &click);
+    bool pointing_at_control() const;
 
     Hooks hooks_;
     Page *top_ = nullptr, *page_ = nullptr;
-    std::string top_title_, page_title_;
+    std::string top_title_, page_title_;    // page_title_: the page's name, empty on the top page
     struct Level {
         Page *page;
         std::string title;
@@ -274,8 +320,12 @@ private:
 
     // sizes held per page (DrawPanel)
     const Page *sized_page_ = nullptr;
-    float page_w_ = 0, page_h_ = 0;
-    float menu_w_ = 0;                      // every page's text width this opening (SIZES; 0: not measured)
+    float page_h_ = 0;
+    float msg_w_ = 0, msg_h_ = 0;           // the message panel's size this showing: it only grows
+    float menu_w_ = 0;                      // every page's inner width this opening (SIZES; 0: not measured)
+    int help_rows_ = 0;                     // the page's help room in lines, measured on entering it
+    const Page *cropped_page_ = nullptr;    // the page last logged as taller than the layer
+    const Legend *legend_cropped_ = nullptr;    // the legend last logged as larger than its layer
 
     // THE POINTER: the quads as prepare hung them (the room's metres; id 0 panel, 1 CONTROLS, 2 + i box i), where
     // the ray lands, and the rows' top and height in the panel's pixels
@@ -286,10 +336,10 @@ private:
     };
     std::vector<Quad> quads_;
     struct RowRect {
-        float y, h;
+        float y = 0, h = 0;
         // x edges in the panel's pixels (-1: none): the stepper's `<` start and `>` end, its Reset button, the
-        // Confirm button, the value's start (the dropdown hangs from it)
-        float dec0 = -1, inc1 = -1, reset0 = -1, reset1 = -1, conf0 = -1, conf1 = -1, val0 = -1;
+        // Confirm button, the value's start and end (a choice's box: the dropdown hangs from it)
+        float dec0 = -1, inc1 = -1, reset0 = -1, reset1 = -1, conf0 = -1, conf1 = -1, val0 = -1, val1 = -1;
     };
     std::vector<RowRect> rows_;
     int hit_id_ = -1;                       // the quad under the ray (-1 none)
@@ -298,6 +348,8 @@ private:
     ControllerModels models_;
     ControllerModels::Draw ctl_[2];
     float hit_x_ = 0, hit_y_ = 0;           // the point on it, in that layer's own pixels from its top left
+    bool msg_hover_ = false;                // the ray is on the message panel's \x01 row
+    std::vector<char> msg_kinds_;           // the message panel's lines' kinds, as drawn (the hit test's rows)
     int hover_row_ = -1;                    // the visible row under the ray (-1 none; only on the panel)
     int pointing_ = -1;                     // the hand that points (Input::kLeft / kRight), -1 none
     bool trigger_was_[2] = {}, trigger_pressed_[2] = {};
@@ -313,7 +365,11 @@ private:
 
     // the picture
     void *ctx_ = nullptr;                   // ImGuiContext
-    ImFont *font_ = nullptr, *help_font_ = nullptr, *small_font_ = nullptr;
+    // font_: the label face at the row size (the note's). The rest by use (menu.cpp sizes): the row
+    // label, the header and the Return row's bold, the card title's bold; the value face regular and bold, at the
+    // help's size, and at the hint's (also Reset, the version).
+    ImFont *font_ = nullptr;
+    UiFont row_f_, head_f_, title_f_, ret_f_, val_f_, valb_f_, help_f_, small_f_, smallb_f_;
     struct Drawn {
         Layer *layer = nullptr;
         uint32_t max_w = 0, max_h = 0;

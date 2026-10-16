@@ -235,6 +235,9 @@ GraphicsRows graphics_rows(const Options &o)
     rows.sharpen.gap = true;
     bool shown = rows.sharpen_shown;
     rows.sharpen.shown = [shown] { return shown; };
+    // the first row starts the PROFILE card, its title showing the profile (read live, as the row's value is)
+    rows.profile[0].group = "PROFILE";
+    rows.profile[0].group_value = [] { return std::string(kProfileNames[gfx.profile >= 0 && gfx.profile <= 2 ? gfx.profile : kCustom]); };
     // the help lines the game gave
     rows.profile[0].help = g_hooks.help_profile;
     rows.profile[1].help = g_hooks.help_rate;

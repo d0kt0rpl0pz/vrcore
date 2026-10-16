@@ -203,8 +203,8 @@ speakers, the settings file, and the self test and soak test.
 A front's pages are `std::vector<ui::Item>` (`ui/menu.h`), handed to `ui::Menu`. The menu owns the panel, the
 selection, the keys, the pointer and the controllers. The front owns what the rows say and do.
 
-**Row builders.** Each returns an `Item`; set `gap` (a blank line above) and `help` (shown while selected) on it and
-push it into a page:
+**Row builders.** Each returns an `Item`; set `group` or `gap` (a new card starts here, below) and `help` (shown
+while selected) on it and push it into a page:
 
 | Builder | Row | D-pad / keys | Pointer |
 |---|---|---|---|
@@ -220,6 +220,42 @@ Every builder fills the same `value` / `change` / `press` / `sub` fields an item
 keyboard take the same paths whatever the kind; the kind only adds what the pointer and the picture do (`Item::kind`,
 `Kind`). **An item filled in by hand** (label, `value`, `change`) still works and looks as it did: `Kind::Legacy`,
 no `<` `>`, and a pointer click is A. New `Item` fields are only ever added at the struct's end.
+
+**Cards.** A page's rows are drawn in cards. A card starts at the page's first row and at every row with a `group`
+or a `gap`. `Item::group` is the card's title strip (drawn upper case), and `Item::group_value`, when set, adds
+` · value` after it in the heading colour; a `gap` without a group starts an untitled card. The Return row sits under
+the cards. A card whose rows are all hidden is not drawn, but its room is kept, as hidden rows' is. `ui/graphics.h`'s
+rows already start a `PROFILE · <profile>` card, so a front puts them on its Graphics page as they are.
+
+**The theme.** `Hooks::theme` (`ui::Theme`, read once at `Menu::init`) is how a game makes the menu its own; every
+field is optional and an empty one is vrcore's default:
+
+```cpp
+h.theme.label_font = "fonts/Oswald-Medium.ttf";        // labels, the header, card titles, Return
+h.theme.label_bold_font = "fonts/Oswald-SemiBold.ttf";
+h.theme.value_font = "fonts/SpaceMono-Regular.ttf";    // values, help, the hint; monospace
+h.theme.value_bold_font = "fonts/SpaceMono-Bold.ttf";
+h.theme.key = 0xFF3FA4;      // the selected row's bar, a hot arrow or button, a dropdown's edge, the ray over a control
+h.theme.heading = 0x4FE3FF;  // the page title, card values, the CONTROLS heading, a toggle's squares
+```
+
+The defaults are Barlow Condensed and IBM Plex Mono, key `#FFC21A` and heading `#8CFFCC`. The rest of the palette
+(the panel's ground, borders, row and help text) is vrcore's and is not themed. The selected row's text is black or
+white, whichever reads better on the key colour, so any key colour works. The fonts a theme can name are the ones in
+`assets/fonts/` (SIL OFL 1.1, packed into every APK; the sim reads them from `VRCORE_ASSETS_DIR`); a path is relative
+to the assets. Name both weights of a family: a weight drawn is a file loaded, and a missing bold falls back to the
+regular. A font that fails to load is logged (`ui: font ...`) and the default is used; if that fails too, ImGui's
+built-in font, so the menu always draws. Arrows and triangles are drawn as shapes, so any font will do for them.
+The value font must be monospace: `label_fn` rows (a scrolling window) are drawn in it so their width follows the
+text's length.
+
+**Sizes.** Every size in the panel is a multiple of one unit, a 38th of the row pitch (`kC` in `ui/menu.cpp`); a row
+is 43.8 mm at the panel's 1.1 m. With the default fonts the capitals come to 14.8 mm for labels, 9.9 mm for values,
+10.5 mm for help and 8.7 mm for the hint (from the fonts' metrics). Checked on a Quest 3 (2026-10-16): help and hint
+were raised a step after reading a little hard, and frame time with the menu open was unchanged, the panel being a
+quad layer. A wider font (a theme's)
+makes the panel wider, never a row taller; a page that needs more than the 2048 px layer is logged
+(`ui: a page needs ...`).
 
 **The pointer.** While a controller is showing, the right hand's aim ray (the left's only while the right is not
 tracked; there is no handedness setting) is cast at the panel and the boxes. Hovering a row selects it, the same
@@ -244,7 +280,7 @@ device in that hand, at each shown hand's grip: the interaction profile the runt
 `assets/controllers/`, ASTC textures beside each GLB), and any other profile, or none yet (the sim), gets the generic
 trigger / squeeze / thumbstick pair (`assets/controller_left.glb`, `controller_right.glb`). The host suggests bindings
 for each of those profiles; Pico's need `XR_BD_controller_interaction`. A ray from the pointing hand's aim, and a
-thin ray from the pointing hand's aim to what it hits (2 m when it hits nothing, yellow over something clickable).
+thin ray from the pointing hand's aim to what it hits (2 m when it hits nothing, in the theme's key colour over something clickable).
 A front draws nothing for them.
 
 **`overlay_draw`** (`app/layers.h`) is the hook that makes this possible, and a front may use it too. The panel and
@@ -253,8 +289,14 @@ boxes are compositor quad layers, which sit over the eye pass, so a controller d
 projection layer composited above all the quads (on the desktop sim, at the end of the eye pass after them). It uses
 the eye pipelines and views, has its own depth, and costs nothing on frames it is not asked for.
 
-**What a front gets for free:** the pointer, the cursor, haptics, the hint line, the controller models and ray, the
-hide rule, the dropdown and the row kinds' pictures, and sizing (the panel reserves room for the longest choice list,
+**The message panel.** While `Hooks::message` returns a text (the game could not start), the panel shows it in
+place of the menu, in the same style, with `Hooks::pick`'s lines under it (a line starting with `\x01` is the picker's
+row, drawn on the key bar; `\x02` a note in a dimmer colour). A / Enter, or the trigger with the ray on the `\x01`
+row, calls `pick(true)`. Its size only grows while it shows.
+
+**What a front gets for free:** the look (header, cards, the selected bar, the controls' pictures, help and hint)
+in its theme, the fonts, the pointer, the cursor, haptics, the hint line, the controller models and ray, the
+hide rule, the dropdown, the message panel with its picker row, and sizing (the panel reserves room for the longest choice list,
 the Confirm button and each row's reserved value, so it never grows while open). A front writes its pages and
 nothing else. `host/test/menu_front.cpp` (the `vrcore_menu` target, desktop only, built beside `vrcore_scene`) is a game-free
 page set using every kind; `--menu` opens it at the start and `--page NAME` on a sub page, for a headless `--shot`; in the sim the mouse is the right controller while the menu or the
