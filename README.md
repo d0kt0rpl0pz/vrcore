@@ -31,6 +31,7 @@ android/       the Gradle project for the APK (SDL's activity, the file picker)
 assets/        the hand wheel's and the menu controllers' models, the menu's fonts (SIL OFL) and the licences
                packed into the APK
 tools/         fetch_extern.py (the pinned libraries), vr_plugin_test.c (headless plugin test),
+               textstrings.py (the UI wording CSV to a header),
                quest_install.sh / quest_bench.sh / quest_profile.py
 ```
 

@@ -22,6 +22,7 @@
 #ifndef __ANDROID__
 #include "settings_test.h"
 #include "../ui/soundtrack_test.h"
+#include "../ui/text_test.h"
 #endif
 
 namespace vrcore {
@@ -47,7 +48,7 @@ bool parse(const AppInfo &info, Options &o, int argc, char **argv)
     static const char *const kValued[] = {"--frames", "--hz", "--eye", "--foveation", "--foveation-cycle",
                                           "--cpu-level", "--gpu-level", "--shot", "--rig-test",
                                           "--audio-test", "--soundtrack-test", "--spatial", "--settings", "--settings-test",
-                                          "--sharpen"};
+                                          "--text-test", "--sharpen"};
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
         if (!std::strcmp(a, "--fdm-view")) { o.fdm_view = true; continue; }
@@ -80,6 +81,7 @@ bool parse(const AppInfo &info, Options &o, int argc, char **argv)
         else if (!std::strcmp(a, "--audio-test")) o.audio_test = v;
         else if (!std::strcmp(a, "--soundtrack-test")) o.soundtrack_test = v;
         else if (!std::strcmp(a, "--settings-test")) o.settings_test = v;
+        else if (!std::strcmp(a, "--text-test")) o.text_test = v;
         else if (!std::strcmp(a, "--settings")) continue;       // run() took it before the front's settings
         else if (!std::strcmp(a, "--spatial")) {
             if (std::strcmp(v, "0") && std::strcmp(v, "1")) {
@@ -262,6 +264,7 @@ int run(const AppInfo &info, int argc, char **argv)
     if (o.audio_test) return audio::audio_test(o.audio_test);
     if (o.soundtrack_test) return ui::soundtrack_test(o.soundtrack_test);
     if (o.settings_test) return settings::settings_test(o.settings_test);
+    if (o.text_test) return ui::text_test(o.text_test);
 #endif
     audio::set_spatial(o.spatial);
     log("%s: hz %.0f, eye x%.2f, foveation %d, sharpen %d, spatial sound %s%s%s%s%s", info.name, o.hz,

@@ -3,11 +3,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+
+#include "ui/text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore {
 namespace rig {
 
-const char *const Stick::ResponseNames[kResponses] = {"Linear", "Slight", "Medium", "Strong", "Very Strong"};
+const char *const Stick::ResponseNames[kResponses] = {txt::rig_response_linear, txt::rig_response_slight, txt::rig_response_medium,
+                                                      txt::rig_response_strong, txt::rig_response_very_strong};
 const int Stick::DeadzoneSteps[kDeadzoneSteps] = {0, 2, 5, 8, 10, 15, 20};
 const int Stick::RangeSteps[kRangeSteps] = {100, 90, 80, 70, 60};
 const int Stick::TimeSteps[kTimeSteps] = {0, 50, 100, 150, 200, 300};
@@ -30,6 +35,14 @@ template <int N> int next(const int (&steps)[N], int v, int d)
 // full lock per second from a step's milliseconds; 0: instant
 float rate(int ms) { return ms <= 0 ? 0.f : 1000.f / (float)ms; }
 
+// a menu row's short text, cut to the Label
+Label label(const std::string &text)
+{
+    Label l;
+    std::snprintf(l.s, sizeof l.s, "%s", text.c_str());
+    return l;
+}
+
 }
 
 void Stick::step_response(int d) { response = (response + d + kResponses) % kResponses; }
@@ -40,26 +53,18 @@ void Stick::step_snapback(int d) { snapback = next(TimeSteps, snapback, d); }
 
 Label Stick::deadzone_name() const
 {
-    Label l;
-    if (deadzone == 0) std::snprintf(l.s, sizeof l.s, "Off");
-    else std::snprintf(l.s, sizeof l.s, "%d%%", deadzone);
-    return l;
+    return deadzone == 0 ? label(txt::rig_deadzone_off)
+                         : label(ui::fmt(txt::rig_percent, {{"v", std::to_string(deadzone)}}));
 }
 
 Label Stick::range_name() const
 {
-    Label l;
-    if (range == 100) std::snprintf(l.s, sizeof l.s, "100%% (full lock)");
-    else std::snprintf(l.s, sizeof l.s, "%d%%", range);
-    return l;
+    return range == 100 ? label(txt::rig_range_full) : label(ui::fmt(txt::rig_percent, {{"v", std::to_string(range)}}));
 }
 
 Label Stick::time_name(int ms)
 {
-    Label l;
-    if (ms == 0) std::snprintf(l.s, sizeof l.s, "Instant");
-    else std::snprintf(l.s, sizeof l.s, "%d ms", ms);
-    return l;
+    return ms == 0 ? label(txt::rig_time_instant) : label(ui::fmt(txt::rig_time_ms, {{"ms", std::to_string(ms)}}));
 }
 
 float Stick::gamma(int response) { return kGammas[response]; }

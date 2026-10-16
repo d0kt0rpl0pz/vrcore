@@ -26,6 +26,8 @@
 #include "../audio/soundtrack.h"
 #include "log.h"
 #include "settings.h"
+#include "text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::ui {
 
@@ -39,7 +41,8 @@ constexpr int kWindow = 10;                 // tracks a window of the Tracks pag
 constexpr size_t kLabelChars = 44;          // a row's text (the font is fixed width: the panel does not grow)
 constexpr double kNowPlayingS = 3.0;
 enum { kInOrder = 0, kShuffle = 1, kRepeatOne = 2 };
-const char *const kModes[] = {"In order", "Shuffle", "Repeat one"};
+const char *const kModes[] = {txt::soundtrack_mode_in_order, txt::soundtrack_mode_shuffle,
+                              txt::soundtrack_mode_repeat_one};
 
 struct State {
     SoundtrackHooks hooks;
@@ -260,7 +263,7 @@ void poll_current()
     if (file == g.track && !g.note.empty()) return;
     g.track = file;
     st::set_string(key("track").c_str(), g.track.c_str());
-    g.note = "Now playing: " + clip(p->tracks[c].label());
+    g.note = fmt(txt::soundtrack_now_playing_note, {{"title", clip(p->tracks[c].label())}});
     if (g.now_playing) g.note_until = g.now + kNowPlayingS;
 }
 
@@ -324,17 +327,17 @@ void follow(const std::vector<std::string> &was, const std::vector<std::string> 
 
 std::string status_text()
 {
-    if (lib::asking()) return "Waiting for the permission...";
-    if (lib::picking()) return "Choosing a folder...";
-    if (!g.scan) return lib::scanning() ? "Looking for songs..." : "No songs scanned yet";
-    if (lib::scanning() && g.scan->found != lib::Found::Ok) return "Looking for songs...";
+    if (lib::asking()) return txt::soundtrack_status_asking;
+    if (lib::picking()) return txt::soundtrack_status_picking;
+    if (!g.scan) return lib::scanning() ? txt::soundtrack_status_scanning : txt::soundtrack_status_not_scanned;
+    if (lib::scanning() && g.scan->found != lib::Found::Ok) return txt::soundtrack_status_scanning;
     switch (g.scan->found) {
-    case lib::Found::Ok: return g.gave_up ? "None of these tracks could be played" : "";
-    case lib::Found::NoAccess: return "The Quest's music folder cannot be read";
-    case lib::Found::PickLost: return "The chosen folder is no longer allowed";
-    case lib::Found::Missing: return "No Music/Soundtracks folder found";
-    case lib::Found::Empty: return "No songs in Music/Soundtracks";
-    case lib::Found::Unreadable: return "The music folder could not be read";
+    case lib::Found::Ok: return g.gave_up ? txt::soundtrack_status_gave_up : "";
+    case lib::Found::NoAccess: return txt::soundtrack_status_no_access;
+    case lib::Found::PickLost: return txt::soundtrack_status_pick_lost;
+    case lib::Found::Missing: return txt::soundtrack_status_missing;
+    case lib::Found::Empty: return txt::soundtrack_status_empty;
+    case lib::Found::Unreadable: return txt::soundtrack_status_unreadable;
     }
     return "";
 }
@@ -349,26 +352,26 @@ void build_pages(Menu &menu)
     g_page.clear();
     g_tracks.clear();
 
-    Item on = toggle("Custom soundtrack", [] { return g.on; }, [](bool v) { set_on(v); });
-    on.help = "Plays your own songs from Music/Soundtracks in place of the game's music.";
+    Item on = toggle(txt::soundtrack_on_label, [] { return g.on; }, [](bool v) { set_on(v); });
+    on.help = txt::soundtrack_on_help;
     g_page.push_back(on);
 
     // why there is nothing to play, and what can be done
     Item why = note(std::string(kLabelChars, 'x'), [] { return clip(status_text()); });
     why.shown = [] { return !status_text().empty(); };
     g_page.push_back(why);
-    Item hint = note(std::string(kLabelChars, 'x'), [] { return std::string("Copy songs over USB; a folder is a playlist"); });
+    Item hint = note(std::string(kLabelChars, 'x'), [] { return std::string(txt::soundtrack_copy_hint); });
     hint.shown = [] { return g.scan && (g.scan->found == lib::Found::Missing || g.scan->found == lib::Found::Empty); };
     g_page.push_back(hint);
-    Item allow = action("Allow access to music", [] {
+    Item allow = action(txt::soundtrack_allow_label, [] {
         lib::ask();
     });
     allow.shown = [] { return access_problem() && !lib::asking(); };
-    allow.help = "Lets the game read your music folder. It is asked once.";
+    allow.help = txt::soundtrack_allow_help;
     g_page.push_back(allow);
 
     const size_t pl_at = g_page.size();
-    Item pl = choice("Playlist", {"-"}, [] { return std::max(g.pl, 0); },
+    Item pl = choice(txt::soundtrack_playlist_label, {"-"}, [] { return std::max(g.pl, 0); },
                      [](int i) {
                          if (!g.scan || i < 0 || i >= (int)g.scan->playlists.size() || i == g.pl) return;
                          g.pl = i;
@@ -387,51 +390,51 @@ void build_pages(Menu &menu)
     pl.gap = true;
     g_page.push_back(pl);
 
-    Item tr = page("Tracks", g_tracks);
+    Item tr = page(txt::soundtrack_tracks_label, g_tracks);
     tr.shown = [] { return can_play(); };
     g_page.push_back(tr);
 
-    Item mode = choice("Mode", {kModes[0], kModes[1], kModes[2]}, [] { return g.mode; },
+    Item mode = choice(txt::soundtrack_mode_label, {kModes[0], kModes[1], kModes[2]}, [] { return g.mode; },
                        [](int m) {
                            g.mode = m;
                            st::set_int(key("mode").c_str(), m);
                            if (g.on && g.started && g.cur >= 0) make_order(g.cur);
                        });
     mode.shown = [] { return can_play(); };
-    mode.help = "Shuffle plays every track once, in a random order, before any repeats.";
+    mode.help = txt::soundtrack_mode_help;
     g_page.push_back(mode);
-    Item next = action("Next", [] { step(1); });
+    Item next = action(txt::soundtrack_next, [] { step(1); });
     next.shown = [] { return can_play() && g.started; };
     next.gap = true;
     g_page.push_back(next);
-    Item prev = action("Previous", [] { step(-1); });
+    Item prev = action(txt::soundtrack_previous, [] { step(-1); });
     prev.shown = [] { return can_play() && g.started; };
     g_page.push_back(prev);
 
-    Item vol = stepper("Volume", [] { return (float)g.volume; },
+    Item vol = stepper(txt::soundtrack_volume_label, [] { return (float)g.volume; },
                        [](float v) {
                            g.volume = (int)std::lround(v);
                            st::set_int(key("volume").c_str(), g.volume);
                            apply_volume();
                        },
-                       5.f, 0.f, 100.f, [](float v) { return std::to_string((int)std::lround(v)) + "%"; });
+                       5.f, 0.f, 100.f, [](float v) { return fmt(txt::soundtrack_volume_value, {{"v", std::to_string((int)std::lround(v))}}); });
     vol.gap = true;
     g_page.push_back(vol);
-    g_page.push_back(toggle("Now playing", [] { return g.now_playing; }, [](bool v) {
+    g_page.push_back(toggle(txt::soundtrack_now_playing_label, [] { return g.now_playing; }, [](bool v) {
         g.now_playing = v;
         st::set_bool(key("nowplaying").c_str(), v);
     }));
-    g_page.back().help = "Shows the song's name for a few seconds when it changes.";
+    g_page.back().help = txt::soundtrack_now_playing_help;
     g_page.push_back(menu.return_item());
     g_page.back().gap = true;
     g_playlist_row = &g_page[pl_at];
 
     // the Tracks window. Its rows never come and go as it scrolls (the cursor would land a row off): Earlier is a
     // blank note at the top, Later one at the bottom.
-    Item top = note("Earlier tracks", [] { return std::string(); });
+    Item top = note(txt::soundtrack_earlier, [] { return std::string(); });
     top.shown = [] { return g.window == 0; };
     g_tracks.push_back(top);
-    Item up = action("Earlier tracks", [] { g.window = std::max(0, g.window - kWindow); });
+    Item up = action(txt::soundtrack_earlier, [] { g.window = std::max(0, g.window - kWindow); });
     up.shown = [] { return g.window > 0; };
     g_tracks.push_back(up);
     for (int r = 0; r < kWindow; ++r) {
@@ -460,16 +463,17 @@ void build_pages(Menu &menu)
             };
         g_tracks.push_back(row);
     }
-    Item down = action("Later tracks", [] { g.window = std::min(g.window + kWindow, std::max(0, tracks() - kWindow)); });
+    Item down = action(txt::soundtrack_later, [] { g.window = std::min(g.window + kWindow, std::max(0, tracks() - kWindow)); });
     down.shown = [] { return g.window + kWindow < tracks(); };
     g_tracks.push_back(down);
-    Item bottom = note("Later tracks", [] { return std::string(); });
+    Item bottom = note(txt::soundtrack_later, [] { return std::string(); });
     bottom.shown = [] { return g.window + kWindow >= tracks(); };
     g_tracks.push_back(bottom);
-    Item count = note(std::string(24, 'x'), [] {
+    Item count = note(std::string(25, 'x'), [] {
         const int n = tracks();
-        return "Showing " + std::to_string(std::min(n, g.window + 1)) + "-" +
-               std::to_string(std::min(n, g.window + kWindow)) + " of " + std::to_string(n);
+        return fmt(txt::soundtrack_showing, {{"first", std::to_string(std::min(n, g.window + 1))},
+                                             {"last", std::to_string(std::min(n, g.window + kWindow))},
+                                             {"count", std::to_string(n)}});
     });
     count.gap = true;
     g_tracks.push_back(count);

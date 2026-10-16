@@ -95,6 +95,7 @@
 #include "controllers.h"
 #include "gpu/render.h"
 #include "input.h"
+#include "ui/textstrings.h"
 
 struct ImDrawList;
 struct ImFont;
@@ -154,7 +155,7 @@ struct Item {
 
 // The row builders. Each returns an Item to set `gap` and `help` on and push into a Page.
 Item toggle(const std::string &label, std::function<bool()> get, std::function<void(bool)> set,
-            const char *on_text = "On", const char *off_text = "Off");
+            const char *on_text = txt::toggle_on, const char *off_text = txt::toggle_off);
 Item choice(const std::string &label, std::vector<std::string> labels, std::function<int()> get,
             std::function<void(int)> set);
 // A number from `lo` to `hi` in steps of `step` (left / right and the pointer's halves move it one step); `format`

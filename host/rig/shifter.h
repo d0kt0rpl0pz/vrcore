@@ -31,6 +31,7 @@
 #include <cstdint>
 
 #include "../app/input.h"
+#include "ui/textstrings.h"
 
 namespace vrcore {
 namespace rig {
@@ -52,9 +53,9 @@ public:
     bool engaged = false;               // a new gate this frame (send the tick)
     uint32_t from = 0;                  // the gate's stick: a pad's id, or 0 the Touch controller
 
-    const char *name() const { return on ? "Right stick" : "Grips"; }
-    const char *legend_key() const { return mode == Mode::HGate4 ? "Right Stick, corners" : "Right Stick, up / down"; }
-    const char *legend_action() const { return mode == Mode::HGate4 ? "Gears 1-4 (H pattern)" : "Shift up / down"; }
+    const char *name() const { return on ? txt::shifter_name_on : txt::shifter_name_off; }
+    const char *legend_key() const { return mode == Mode::HGate4 ? txt::shifter_legend_key_h : txt::shifter_legend_key_seq; }
+    const char *legend_action() const { return mode == Mode::HGate4 ? txt::shifter_legend_action_h : txt::shifter_legend_action_seq; }
 
     // Once a frame. `driving`: the game has the controls. The right hand's stick (when active) and every pad's
     // right stick, the strongest wins. Returns the gate (also `gate`).

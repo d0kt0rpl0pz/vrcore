@@ -48,7 +48,7 @@ struct SoundtrackHooks {
 };
 
 void soundtrack_load(const SoundtrackHooks &hooks);
-Item soundtrack_item(Menu &menu, const char *label = "Soundtrack");
+Item soundtrack_item(Menu &menu, const char *label = txt::soundtrack_default_label);
 void soundtrack_menu_opened();
 void soundtrack_update(Menu &menu, const Tick &t, const Input &in);
 bool soundtrack_replacing();

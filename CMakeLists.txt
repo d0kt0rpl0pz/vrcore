@@ -116,6 +116,36 @@ function(vrcore_add_shaders target out src)
 endfunction()
 set(VRCORE_SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 
+# vrcore_textstrings(<target> <csv> <header> <namespace>): the headset UI wording in <csv> (id,en,note) turned
+# into <header> in the build tree by tools/textstrings.py, whose constants are <namespace>::txt::<id with dots as
+# underscores>. <header> is a relative path such as ui/textstrings.h, found with #include "ui/textstrings.h": the
+# build tree's vrcore_text/ folder is on <target>'s include path, and on that of whatever links it. The header is
+# rebuilt when the CSV or the script changes, and the script's checks (see its head) stop the build on a bad CSV.
+# A game's front calls this with its own target, CSV, header path and namespace; a header path already taken
+# (the host's is ui/textstrings.h) stops the configure.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+function(vrcore_textstrings target csv header namespace)
+    set(_dir ${CMAKE_BINARY_DIR}/vrcore_text)
+    set(_out ${_dir}/${header})
+    # one folder for every caller, so a front must not reuse the host's ui/textstrings.h (front/textstrings.h)
+    get_property(_taken GLOBAL PROPERTY VRCORE_TEXT_HEADERS)
+    if(${header} IN_LIST _taken)
+        message(FATAL_ERROR "vrcore_textstrings: ${header} is already generated; give ${csv} another header path")
+    endif()
+    set_property(GLOBAL APPEND PROPERTY VRCORE_TEXT_HEADERS ${header})
+    get_filename_component(_csv ${csv} ABSOLUTE)
+    set(_py ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/tools/textstrings.py)
+    get_filename_component(_outdir ${_out} DIRECTORY)
+    add_custom_command(OUTPUT ${_out}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_outdir}
+        COMMAND ${Python3_EXECUTABLE} -I ${_py} ${_csv} ${_out} ${namespace}
+        DEPENDS ${_csv} ${_py}
+        COMMENT "textstrings ${header}"
+        VERBATIM)
+    target_sources(${target} PRIVATE ${_out})
+    target_include_directories(${target} PUBLIC ${_dir})
+endfunction()
+
 # The host: C++17 (no exceptions or RTTI on Android) plus the board-neutral C99 in native/. Every
 # Vulkan call goes through volk (VK_NO_PROTOTYPES), loaded at run time.
 add_library(vrcore_host STATIC
@@ -155,6 +185,7 @@ add_library(vrcore_host STATIC
     host/ui/menu.cpp
     host/ui/pick.cpp
     host/ui/soundtrack_page.cpp
+    host/ui/text.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui_draw.cpp
     ${VRCORE_EXTERN_DIR}/imgui/imgui_tables.cpp
@@ -173,13 +204,15 @@ if(ANDROID)
         host/audio/decode_android.cpp)
 else()
     target_sources(vrcore_host PRIVATE host/audio/decode_apple.cpp)
-    target_sources(vrcore_host PRIVATE host/rig/rig_test.cpp host/audio/audio_test.cpp host/app/settings_test.cpp host/ui/soundtrack_test.cpp host/sim/sim.cpp host/sim/sim_layers.cpp)
+    target_sources(vrcore_host PRIVATE host/rig/rig_test.cpp host/audio/audio_test.cpp host/app/settings_test.cpp host/ui/soundtrack_test.cpp host/ui/text_test.cpp host/sim/sim.cpp host/sim/sim_layers.cpp)
     find_library(VRCORE_MOLTENVK NAMES MoltenVK HINTS /opt/homebrew/lib /usr/local/lib)
     if(NOT VRCORE_MOLTENVK)
         message(FATAL_ERROR "vrcore: no MoltenVK (brew install molten-vk)")
     endif()
     target_compile_definitions(vrcore_host PRIVATE VRCORE_MOLTENVK_PATH="${VRCORE_MOLTENVK}")
 endif()
+# the host's own UI wording (host/ui/textstrings.csv), as <vrcore::txt> in ui/textstrings.h
+vrcore_textstrings(vrcore_host ${CMAKE_CURRENT_SOURCE_DIR}/host/ui/textstrings.csv ui/textstrings.h vrcore)
 # the layers' quad: the sim's stand-in for every layer; on both hosts an underlay's hole (layer_punch)
 vrcore_add_shaders(vrcore_host layer_quad.vert ${VRCORE_SHADER_DIR}/layer_quad.vert)
 vrcore_add_shaders(vrcore_host layer_punch.frag ${VRCORE_SHADER_DIR}/layer_punch.frag)

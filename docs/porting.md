@@ -330,6 +330,49 @@ are `ui::note` rows, which the cursor and the pointer skip. The page's choices a
 `Item::label_fn` and `Item::edge` (`ui/menu.h`, A SCROLLING WINDOW) are what let a page show a window of a long
 list: a few fixed rows whose text follows an offset, scrolled by up / down off the window's ends.
 
+## Text
+
+The words the headset shows (row labels, choices, help lines, messages, page titles) live in a CSV, not in the
+code. The host's are `host/ui/textstrings.csv`; a front keeps its own beside its code. CMake turns each CSV into a
+header of constants at build time, so nothing is parsed at run time and a wrong id is a compile error. Log lines,
+test output, file signatures, settings keys and the headset names used for matching stay in code.
+
+**The CSV.** Columns `id,en,note`. The id is dotted lower case (`soundtrack.shuffle.help`); `note` is context for
+the editor and is not used. A line starting with `#` is a comment. A quoted field may hold line breaks (CRLF and CR
+read as LF). `{slot}` is filled by the program, `{{` and `}}` are literal braces. Basic Latin only: the menu fonts
+have nothing else, so a curly quote or a dash pasted from a word processor stops the build.
+
+**In CMake.** `vrcore_textstrings(<target> <csv> <header> <namespace>)` runs `tools/textstrings.py` on the CSV when
+it or the script changes, and adds the header to the target. `<header>` is relative to `<build>/vrcore_text/`, which
+is on the target's include path, so `#include "front/textstrings.h"` finds it. A front uses its own path such as
+`front/textstrings.h`: the host's is `ui/textstrings.h`, and a path already taken stops the configure. Each row
+becomes `inline constexpr const char *` named `<namespace>::txt::<id with dots as underscores>`, so
+`soundtrack.shuffle.help` in namespace `front` is `front::txt::soundtrack_shuffle_help`. The constants fit the
+existing `const char *` and `std::string` fields (`Item::help`, `label`), so a front's row builders and accessors
+are unchanged, and the ABI is too.
+
+**Slots.** `fmt(text, {{"name", value}})` (`ui/text.h`) fills the slots and returns a `std::string`. A slot with no
+value shows as `{name?}` and is logged once; a value for a slot the text lacks is logged once. A `fmt()` result is
+for a `std::string` field or a `label_fn`; never put its `c_str()` in a `const char *` field such as `Item::help`,
+which needs a constant from the CSV.
+
+**Checks.** The generator fails the build on: a header other than `id,en,note` or a row with the wrong number of
+fields; a bad or duplicate id (two ids equal once dots become underscores, or one that is a C++ keyword); an empty
+`en`; a slot that is not lower case letters and underscores, or an unbalanced brace; a character outside printable
+ASCII. `tools/textstrings_check.py [--allow FILE] [DIR ...]` lists the headset-looking string literals still in C++
+code (a capital then a lower-case letter, or two words), skipping comments and log or test lines. What may stay is
+in `tools/textstrings_allow.txt` (`file <glob>` skips a file, `literal <path-glob> <text>` allows one literal); a
+front passes its own allowlist and folder to check its code.
+
+**No overrides.** A game cannot replace a host string. A game that wants other wording passes its own id where it
+builds the row.
+
+**Widths.** A fixed-width row, and a sample string that reserves width (`label_fn` against its `label`,
+`widest_value`), must keep to the widest real text. When a CSV edit makes a text longer, check these rows.
+
+**The hint line** under the help reads two marks in its text: `*word*` is drawn as a key word and `|` as a middle
+dot, so a literal `*` or `|` cannot be used there.
+
 ## Building
 
 **Finding vrcore.** vrcore is its own repository, never copied into a game. A game keeps a small helper script
@@ -338,6 +381,9 @@ commit and any local changes), cloned when it is not there. Every build step ask
 Android script and its Quest tools. Nothing fetches or checks anything out in that clone; keeping it current is
 done by hand. Set `VRCORE_DIR` to build against another vrcore folder. A game may instead pin one full commit
 hash in a file of its own and have the helper check that commit out as a worktree; none is required to.
+
+**Prerequisites.** Python 3 is needed at configure time (`find_package(Python3 COMPONENTS Interpreter REQUIRED)`, for
+the text generator); the Quest Gradle build runs the same CMake, so it needs Python 3 on the path too.
 
 **Libraries.** `tools/fetch_extern.py --extern <dir>` fetches the pinned third-party sources (`THIRD_PARTY.md`):
 SDL 3, Dear ImGui, the OpenXR SDK, Vulkan-Headers, VMA, volk, cgltf and Steam Audio. A game's setup script calls it
@@ -409,7 +455,7 @@ unchanged:** run with `VR_TEST_HASH=<prefix>` and `VR_TEST_ARGS="--replay <recor
 and compare the hash files.
 
 The host's own device-free checks run in the sim: `--rig-test DIR`, `--audio-test DIR`, `--settings-test DIR`,
-`--soundtrack-test DIR` (it makes its own songs with `afconvert`; exit 0 when everything passed). On a headset, the `tools/quest_*.sh` scripts print their usage with `--help`.
+`--text-test DIR`, `--soundtrack-test DIR` (it makes its own songs with `afconvert`; exit 0 when everything passed). On a headset, the `tools/quest_*.sh` scripts print their usage with `--help`.
 Set `VR_DRY_RUN=1` to print their adb commands with no headset.
 
 ## Changing vrcore

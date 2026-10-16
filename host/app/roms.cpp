@@ -11,6 +11,8 @@
 #include "app.h"
 #include "log.h"
 #include "ui/pick.h"
+#include "ui/text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::roms {
 
@@ -182,7 +184,7 @@ std::string check()
     return message();
 #else
     if (exists(g.where)) return std::string();
-    return std::string("ROM Required to Start\n\nNo ") + s.name + " set at\n" + g.where;
+    return ui::fmt(txt::roms_desktop_missing, {{"set", s.name}, {"path", g.where}});
 #endif
 }
 
@@ -195,53 +197,32 @@ std::string message()
     bool has_game = zip_at(s.zip, game, game_bad);
     bool has_parent = zip_at(s.parent_zip, parent, parent_bad);
     if (game_bad || parent_bad)
-        return std::string(game_bad ? s.zip : s.parent_zip) + " is damaged\n\n"
-               "It could not be read as a zip file. Copy it to the\n"
-               "headset again and choose it again.";
+        return ui::fmt(txt::roms_zip_damaged, {{"zip", game_bad ? s.zip : s.parent_zip}});
     if (s.seven_z && exists(g.where + "/" + s.seven_z))
-        return std::string(s.seven_z) + " could not be read\n\n"
-               "It is not " + s.player + " set, or it is damaged.\n"
-               "Copy the set's zips to the headset's Download folder\n"
-               "and choose them below.";
+        return ui::fmt(txt::roms_seven_z_unreadable, {{"file", s.seven_z}, {"player", s.player}});
     if (!has_game && !has_parent) {
-        std::string need = "ROM Required\n\n"
-                           "This app does not include any copyrighted ROMs.\n";
-        if (!s.parent_zip)
-            return need + "You need " + s.player + " set, " + s.zip + ".\n"
-                   "Copy it to the headset's Download folder,\n"
-                   "then choose it below.";
-        return need + "You need " + s.player + " set: a non-merged\n" +
-               s.zip + ", a merged " + s.parent_zip + ", or " + s.zip + "\n"
-               "and " + s.parent_zip + ". Copy them to the headset's Download\n"
-               "folder, then choose them below, one at a time.";
+        if (!s.parent_zip) return ui::fmt(txt::roms_required_one, {{"player", s.player}, {"zip", s.zip}});
+        return ui::fmt(txt::roms_required_split, {{"player", s.player}, {"zip", s.zip}, {"parent", s.parent_zip}});
     }
     std::set<std::string> h = held(has_game ? &game : nullptr, has_parent ? &parent : nullptr);
     std::vector<std::string> missing;
     for (const Chip &c : g.chips)
         if (!h.count(c.name)) missing.push_back(c.name);
     if (missing.empty())
-        return "The ROMs could not be read\n\n"
-               "Copy them to the headset again and choose them again.";
+        return txt::roms_unreadable;
     if (!has_game && !has(h, s.marker))
-        return std::string(s.zip) + " needed\n\n"
-               "You chose " + s.parent_zip + ", the parent set. This game\n"
-               "is " + s.zip + ", " + s.title + ". Copy it\n"
-               "to the headset's Download folder and choose it below.";
+        return ui::fmt(txt::roms_parent_only, {{"zip", s.zip}, {"parent", s.parent_zip}, {"title", s.title}});
     for (const Note &n : s.notes)
         if (has(h, n.held) && n.missing && !h.count(n.missing) && n.text) return n.text;
     if (s.parent_zip && !has_parent)
-        return std::string("One more file needed: ") + s.parent_zip + "\n\n"
-               "Your " + s.zip + " is a split set, which leaves out the\n"
-               "files it shares with the parent, " + s.parent_title + ". They come\n"
-               "in " + s.parent_zip + ", from the same MAME ROM collection.\n"
-               "Copy it to the headset's Download folder and choose it below.";
+        return ui::fmt(txt::roms_parent_missing,
+                       {{"parent", s.parent_zip}, {"zip", s.zip}, {"parent_title", s.parent_title}});
     size_t n = missing.size();
-    return "Wrong ROM set\n\n"
-           "This set is missing " + missing[0] +
-           (n == 1 ? std::string() : " and " + std::to_string(n - 1) + (n == 2 ? " other file" : " other files")) + "\n"
-           "(or has other versions of " + (n == 1 ? "it" : "them") + "). The game needs\n" +
-           s.player + " (" + s.title_aside + "). Copy that\n"
-           "set to the headset's Download folder and choose it below.";
+    if (n > 2)
+        return ui::fmt(txt::roms_wrong_many, {{"file", missing[0]}, {"others", std::to_string(n - 1)},
+                                              {"player", s.player}, {"title_aside", s.title_aside}});
+    return ui::fmt(n == 1 ? txt::roms_wrong_one : txt::roms_wrong_two,
+                   {{"file", missing[0]}, {"player", s.player}, {"title_aside", s.title_aside}});
 }
 
 std::string adopt(const std::string &uri, const std::string &name, std::string &dest,
@@ -249,11 +230,11 @@ std::string adopt(const std::string &uri, const std::string &name, std::string &
 {
     dest.clear();
     stale.clear();
-    if (!g.set || !g.listed) return name + " cannot be checked: the game lists no ROM files.";
+    if (!g.set || !g.listed) return ui::fmt(txt::roms_unchecked, {{"file", name}});
     const Set &s = *g.set;
     Files z;
     SDL_IOStream *io = SDL_IOFromFile(uri.c_str(), "rb");
-    if (!io) return "Could not open " + name + ".";
+    if (!io) return ui::fmt(txt::roms_open_failed, {{"file", name}});
     bool zip = zip_files(io, z);
     // a 7z by its signature, or by its name: a picked file's name can be a media id with no extension
     uint8_t head[6] = {};
@@ -263,7 +244,7 @@ std::string adopt(const std::string &uri, const std::string &name, std::string &
     if (!zip) {
         size_t n = name.size();
         if (!seven && n >= 3 && !SDL_strcasecmp(name.c_str() + n - 3, ".7z")) seven = true;
-        if (!s.seven_z || !seven) return name + " is not a zip file, or is damaged.";
+        if (!s.seven_z || !seven) return ui::fmt(txt::roms_not_zip, {{"file", name}});
         dest = g.where + "/" + s.seven_z;
         return std::string();
     }
@@ -281,9 +262,9 @@ std::string adopt(const std::string &uri, const std::string &name, std::string &
         dest = g.where + "/" + s.zip;
         stands(s.seven_z);                       // the plugin would read it first
     } else if (s.parent_zip) {
-        return name + " is not " + s.zip + " or " + s.parent_zip + " (the MAME sets).";
+        return ui::fmt(txt::roms_not_set_split, {{"file", name}, {"zip", s.zip}, {"parent", s.parent_zip}});
     } else {
-        return name + " is not " + s.zip + " (the MAME set).";
+        return ui::fmt(txt::roms_not_set, {{"file", name}, {"zip", s.zip}});
     }
     return std::string();
 }
@@ -294,7 +275,7 @@ std::string take(const std::string &uri, const std::string &name, std::string &d
     std::string e = adopt(uri, name, dest, stale);
     if (!e.empty()) return e;
     std::string c = copy(uri, dest);
-    if (!c.empty()) return "Could not copy " + name + ": " + c;
+    if (!c.empty()) return ui::fmt(txt::roms_copy_failed, {{"file", name}, {"error", c}});
     for (const std::string &f : stale) SDL_RemovePath(f.c_str());     // only once the new file is in place
     return std::string();
 }
@@ -338,7 +319,7 @@ std::string pick_row(bool select)
     std::string err;
     if (ui::pick_take(picks, err)) {
         if (!err.empty()) note = err;
-        else if (picks.empty()) note = "No file chosen.";
+        else if (picks.empty()) note = txt::roms_pick_none;
         else if (adopt_all(picks, note)) {
             log("roms: the set copied: the game starts again");
             request_restart();
@@ -346,9 +327,9 @@ std::string pick_row(bool select)
     }
     if (select && !ui::pick_busy()) {
         note.clear();
-        if (!ui::pick_open(true)) note = "Could not open the file picker.";
+        if (!ui::pick_open(true)) note = txt::roms_pick_open_failed;
     }
-    if (ui::pick_busy()) return "Choose the file in the window that opened.";
+    if (ui::pick_busy()) return txt::roms_pick_busy;
     std::string s;
     for (size_t a = 0; !note.empty() && a <= note.size();) {
         size_t b = note.find('\n', a);
@@ -356,7 +337,7 @@ std::string pick_row(bool select)
         if (b == std::string::npos) break;
         a = b + 1;
     }
-    return (s.empty() ? s : s + "\n") + "\x01" + "A:  Choose ROM file...";
+    return (s.empty() ? s : s + "\n") + "\x01" + txt::roms_pick_row;
 #else
     (void)select;
     return std::string();

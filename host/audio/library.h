@@ -27,10 +27,11 @@
 #include <vector>
 
 #include "storage.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::audio::library {
 
-constexpr const char *kLoose = "All tracks";
+constexpr const char *kLoose = txt::library_loose;
 constexpr const char *kFolderKey = "soundtrack.folder";     // the chosen folder (a ref), in the game's settings
 
 struct Track {

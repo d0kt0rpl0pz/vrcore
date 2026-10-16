@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "settings.h"
+#include "text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::ui {
 
@@ -13,9 +15,12 @@ namespace {
 
 namespace st = settings;
 
-const char *const kProfileNames[] = {"Performance", "Fidelity", "Custom"};
-const char *const kFoveationNames[] = {"Off", "Low", "Medium", "High"};
-const char *const kSharpenNames[] = {"Off", "Normal", "Quality"};
+const char *const kProfileNames[] = {txt::graphics_profile_performance, txt::graphics_profile_fidelity,
+                                     txt::graphics_profile_custom};
+const char *const kFoveationNames[] = {txt::graphics_foveation_off, txt::graphics_foveation_low,
+                                       txt::graphics_foveation_medium, txt::graphics_foveation_high};
+const char *const kSharpenNames[] = {txt::graphics_sharpen_off, txt::graphics_sharpen_normal,
+                                     txt::graphics_sharpen_quality};
 
 GraphicsHooks g_hooks;
 int g_saved_profile = -1;           // the saved profile (-1: none saved); a menu made again (a restart) shows it
@@ -36,7 +41,7 @@ int clamp_int(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-std::string fmt(const char *f, double v)
+std::string num(const char *f, double v)
 {
     char b[64];
     std::snprintf(b, sizeof b, f, v);
@@ -195,12 +200,12 @@ GraphicsRows graphics_rows(const Options &o)
     // Each is a typed row (menu.h THE ROW KINDS): the d-pad cycles a choice and steps the eye resolution as the
     // legacy rows did, the pointer gets a dropdown and the stepper's halves.
     std::vector<std::string> rates;
-    for (float r : gfx.rates) rates.push_back(fmt("%.0f Hz", r));
+    for (float r : gfx.rates) rates.push_back(fmt(txt::graphics_rate_value, {{"hz", num("%.0f", r)}}));
     rows.profile.push_back(choice(
-        "Graphics profile", {kProfileNames[0], kProfileNames[1], kProfileNames[2]}, [] { return gfx.profile; },
+        txt::graphics_profile_label, {kProfileNames[0], kProfileNames[1], kProfileNames[2]}, [] { return gfx.profile; },
         [](int i) { set_profile(i); }));
     rows.profile.push_back(choice(
-        "Refresh rate", rates, [] { return gfx.rate; },
+        txt::graphics_rate_label, rates, [] { return gfx.rate; },
         [](int i) {
             gfx.rate = i;
             save_rate();
@@ -208,16 +213,16 @@ GraphicsRows graphics_rows(const Options &o)
             apply();
         }));
     rows.profile.push_back(stepper(
-        "Eye resolution", [] { return gfx.eye; },
+        txt::graphics_eye_label, [] { return gfx.eye; },
         [](float v) {
             gfx.eye = v;
             save_eye();
             changed_by_hand();
             apply();
         },
-        0.1f, 1.f, 3.f, [](float v) { return "x" + fmt("%.1f", v); }));
+        0.1f, 1.f, 3.f, [](float v) { return fmt(txt::graphics_eye_value, {{"v", num("%.1f", v)}}); }));
     rows.profile.push_back(choice(
-        "Foveated rendering", {kFoveationNames[0], kFoveationNames[1], kFoveationNames[2], kFoveationNames[3]},
+        txt::graphics_foveation_label, {kFoveationNames[0], kFoveationNames[1], kFoveationNames[2], kFoveationNames[3]},
         [] { return gfx.foveation; },
         [](int i) {
             gfx.foveation = i;
@@ -226,7 +231,7 @@ GraphicsRows graphics_rows(const Options &o)
             apply();
         }));
     rows.sharpen = choice(
-        "Sharpening", {kSharpenNames[0], kSharpenNames[1], kSharpenNames[2]}, [] { return gfx.sharpen; },
+        txt::graphics_sharpen_label, {kSharpenNames[0], kSharpenNames[1], kSharpenNames[2]}, [] { return gfx.sharpen; },
         [](int i) {
             gfx.sharpen = i;
             st::set_int(key("sharpen").c_str(), gfx.sharpen);
@@ -236,7 +241,7 @@ GraphicsRows graphics_rows(const Options &o)
     bool shown = rows.sharpen_shown;
     rows.sharpen.shown = [shown] { return shown; };
     // the first row starts the PROFILE card, its title showing the profile (read live, as the row's value is)
-    rows.profile[0].group = "PROFILE";
+    rows.profile[0].group = txt::graphics_profile_group;
     rows.profile[0].group_value = [] { return std::string(kProfileNames[gfx.profile >= 0 && gfx.profile <= 2 ? gfx.profile : kCustom]); };
     // the help lines the game gave
     rows.profile[0].help = g_hooks.help_profile;

@@ -1,0 +1,42 @@
+# textstrings_allow.txt -- what tools/textstrings_check.py lets stay in code, and why.
+# Rules: `file <glob>` skips a whole file; `literal <path-glob> <text>` allows one exact literal there.
+# Paths are relative to the repo root.
+
+# ---- test output and the test fronts (not the product's wording) ----
+file host/*_test.cpp
+file host/*/*_test.cpp
+file host/app/selftest.cpp
+file host/app/soak.cpp
+file host/app/soundtrack_probe.cpp
+file host/test/menu_front.cpp
+file host/test/scene_front.cpp
+
+# ---- the text helper's own log words ----
+literal host/ui/text.cpp no value for
+literal host/ui/text.cpp unused value for
+
+# ---- matching and identifiers, never drawn ----
+literal host/app/headset.cpp Adreno (TM) 650
+literal host/app/headset.cpp Adreno (TM) 740
+literal host/app/headset.cpp Pro
+literal host/app/headset.cpp Quest 3
+literal host/app/headset.cpp Quest 2
+literal host/app/headset.cpp Quest Pro
+literal host/audio/storage.cpp Music/Soundtracks
+literal host/ui/menu.cpp Ag
+literal host/ui/menu.cpp label bold
+literal host/ui/menu.cpp value bold
+file host/xr/xr_actions.cpp
+literal host/gpu/eye_target.cpp msaa colour
+literal host/gpu/eye_target.cpp msaa depth
+
+# ---- log and error detail (the log, the probe, a decoder's reason): not shown in the headset ----
+literal host/app/pacing.cpp game rate
+literal host/app/plugin.cpp no plugin named
+literal host/app/plugin.cpp a fresh copy of 
+file host/audio/decode_*.cpp
+file host/audio/storage.cpp
+file host/audio/library.cpp
+file host/gpu/eye_target.cpp
+literal host/ui/soundtrack_page.cpp could not start yet (no sound device?)
+file host/xr/*.cpp

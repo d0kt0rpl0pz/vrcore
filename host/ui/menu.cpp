@@ -18,6 +18,7 @@
 #include "input_host.h"
 #include "layers.h"
 #include "log.h"
+#include "text.h"
 
 namespace vrcore::ui {
 
@@ -99,10 +100,23 @@ ImU32 on_key(uint32_t rgb)
 // THE HINT: one line of the value face under the help; \x01 toggles the key words (white; the rest muted). The
 // pointer form's second part is the widest it can be: point() leaves out what the hands' profiles do not bind
 // (controller_buttons). widest() counts both forms, so nothing resizes when a controller appears.
+// The CSV's text marks them (textstrings.csv head): *word* for the key words, | for the middle dot.
 #define VR_MID " \xc2\xb7 "
-constexpr const char *kKeysLine = "\x01Stick\x01 move" VR_MID "\x01Left/right\x01 or \x01" "A\x01 change" VR_MID "\x01" "B\x01 back" VR_MID "\x01Menu\x01 close";
-constexpr const char *kPointerHead = "\x01Point\x01 and pull the \x01trigger\x01";
-constexpr const char *kPointerTail = "\x01" "B\x01 back" VR_MID "\x01Menu\x01 close";
+std::string hint_markup(const char *text)
+{
+    std::string out;
+    for (const char *p = text; *p; ++p) {
+        if (*p == '*') out += '\x01';
+        else if (*p == '|') out += "\xc2\xb7";
+        else out += *p;
+    }
+    return out;
+}
+const std::string kKeysLine = hint_markup(txt::hint_keys);
+const std::string kPointerHead = hint_markup(txt::hint_point);
+const std::string kPointerBack = hint_markup(txt::hint_back);
+const std::string kPointerMenu = hint_markup(txt::hint_menu);
+const std::string kPointerTail = kPointerBack + VR_MID + kPointerMenu;
 
 const ImU32 kDot = IM_COL32(255, 255, 255, 255);
 constexpr float kDotPx = 0.008f * Menu::kPxPerM;            // the cursor's radius
@@ -495,8 +509,8 @@ void Menu::close()
 Item Menu::restart_item(std::function<void()> saved, bool gap)
 {
     Item it;
-    it.label = "Restart game";
-    it.value = [this] { return std::string(restart_yes_ ? "Yes" : "No"); };
+    it.label = txt::menu_restart_label;
+    it.value = [this] { return std::string(restart_yes_ ? txt::menu_yes : txt::menu_no); };
     it.change = [this](int) { restart_yes_ = !restart_yes_; };
     it.press = [this, saved] {
         if (!restart_yes_) return;
@@ -506,14 +520,14 @@ Item Menu::restart_item(std::function<void()> saved, bool gap)
         request_restart();
     };
     it.gap = gap;
-    it.help = "Starts the game again from power-on, with the Gameplay settings applied. Set it to Yes, then press A.";
+    it.help = txt::menu_restart_help;
     return it;
 }
 
 Item Menu::return_item()
 {
     Item it;
-    it.label = "Return";
+    it.label = txt::menu_return;
     it.kind = Kind::Return;
     it.change = [this](int d) {
         if (d > 0) back();
@@ -620,7 +634,7 @@ Item confirm(const std::string &label, std::function<void()> run)
     it.run = run;
     auto armed = std::make_shared<bool>(false);
     it.armed = armed;
-    it.value = [armed] { return std::string(*armed ? "Yes" : "No"); };
+    it.value = [armed] { return std::string(*armed ? txt::menu_yes : txt::menu_no); };
     it.change = [armed](int) { *armed = !*armed; };
     return it;
 }
@@ -972,12 +986,12 @@ float Menu::control(const Item &it, bool worst, float x, float cy, const Ctl *d,
             put_text(dl, vb, sx + (slot - text_w(valb_f_, v.c_str())) / 2, cy, ink, v.c_str());
         }
         if (it.reset) {
-            const float rx = end + kArrowGap, rw = text_w(smallb_f_, "RESET") + 2 * kResetPadX;
+            const float rx = end + kArrowGap, rw = text_w(smallb_f_, txt::menu_reset) + 2 * kResetPadX;
             if (rr) rr->reset0 = rx, rr->reset1 = rx + rw;
             if (dl) {
                 const bool hot = d->hot == kReset;
                 box(rx, rx + rw, cy - kResetH / 2, cy + kResetH / 2, sel ? ok : g_key, hot);
-                put_text(dl, smallb_f_, rx + kResetPadX, cy, hot ? (sel ? g_key : ok) : sel ? ok : kMuted, "RESET");
+                put_text(dl, smallb_f_, rx + kResetPadX, cy, hot ? (sel ? g_key : ok) : sel ? ok : kMuted, txt::menu_reset);
             }
             end = rx + rw;
         }
@@ -1021,12 +1035,12 @@ float Menu::control(const Item &it, bool worst, float x, float cy, const Ctl *d,
         return kPageW;
     }
     if (it.kind == Kind::Confirm) {
-        const float slot = std::max(text_w(valb_f_, "No"), text_w(valb_f_, "Yes"));
+        const float slot = std::max(text_w(valb_f_, txt::menu_no), text_w(valb_f_, txt::menu_yes));
         if (rr) rr->val0 = x;
         if (dl) put_text(dl, vb, x, cy, ink, it.value().c_str());
         float end = x + slot;
         if (worst || (it.armed && *it.armed)) {
-            const std::string t = "Confirm " + it.label;
+            const std::string t = fmt(txt::menu_confirm, {{"label", it.label}});
             const float bx = x + slot + kBoxGap, bw = 2 * kBoxPadX + text_w(val_f_, t.c_str());
             if (rr) rr->conf0 = bx, rr->conf1 = bx + bw;
             if (dl) {
@@ -1184,7 +1198,7 @@ float Menu::header_width(const std::string &page) const
 {
     float w = text_w(head_f_, upper(top_title_).c_str(), kHeadTrack);
     if (!page.empty()) w += 2 * kSepGap + kSepW + text_w(head_f_, page.c_str(), kHeadTrack);
-    if (!hooks_.version.empty()) w += kVersionGap + text_w(small_f_, ("v" + hooks_.version).c_str());
+    if (!hooks_.version.empty()) w += kVersionGap + text_w(small_f_, fmt(txt::menu_version, {{"version", hooks_.version}}).c_str());
     return w;
 }
 
@@ -1192,7 +1206,7 @@ float Menu::header_width(const std::string &page) const
 // the front's value_reserve after it: the panel's inner width, between its paddings
 float Menu::widest() const
 {
-    float w = std::max(hint_w(small_f_, kKeysLine), hint_w(small_f_, (std::string(kPointerHead) + VR_MID + kPointerTail).c_str()));
+    float w = std::max(hint_w(small_f_, kKeysLine.c_str()), hint_w(small_f_, (kPointerHead + VR_MID + kPointerTail).c_str()));
     std::vector<std::pair<const Page *, std::string>> todo = {{top_, std::string()}};
     std::vector<const Page *> seen;
     const auto all = [](const Item &) { return true; };
@@ -1225,7 +1239,7 @@ void Menu::draw_header(ImDrawList *dl, float in0, float in1, const std::string &
         put_text(dl, head_f_, hx, cy, kWhite, page.c_str(), kHeadTrack);
     }
     if (!hooks_.version.empty()) {
-        const std::string v = "v" + hooks_.version;
+        const std::string v = fmt(txt::menu_version, {{"version", hooks_.version}});
         put_text(dl, small_f_, in1 - text_w(small_f_, v.c_str()), y0 + kHeadH - line_h(small_f_) / 2 - 2 * kC, kMuted, v.c_str());
     }
 }
@@ -1327,7 +1341,7 @@ void Menu::draw_panel(ImDrawList *dl, float ox, const Plan &pl, float w, float h
         }
     }
     const std::string hint = pointer_hint_
-        ? std::string(kPointerHead) + (pointer_buttons_.empty() ? "" : VR_MID + pointer_buttons_) : std::string(kKeysLine);
+        ? kPointerHead + (pointer_buttons_.empty() ? "" : VR_MID + pointer_buttons_) : kKeysLine;
     put_hint(dl, small_f_, in0, pl.hint_y + kHintH / 2, hint.c_str(), kMuted);
 
     // THE ROW KINDS: the open dropdown, under its box, over what lies under it; the current choice marked, the one
@@ -1370,7 +1384,7 @@ void Menu::point(const Input &in, bool &click)
     bool sec[2], menu[2];
     for (int h = 0; h < 2; ++h) controller_buttons(controller_profile(h), sec[h], menu[h]);
     const bool b = sec[0] || sec[1], m = menu[Input::kLeft];
-    pointer_buttons_ = b && m ? kPointerTail : b ? "\x01" "B\x01 back" : m ? "\x01Menu\x01 close" : "";
+    pointer_buttons_ = b && m ? kPointerTail : b ? kPointerBack : m ? kPointerMenu : "";
     int was = hover_row_;
     const bool was_msg = msg_hover_;
     msg_hover_ = false;
@@ -1588,7 +1602,7 @@ void Menu::prepare(gpu::Frame &f)
         const Legend *lg = hooks_.legend && !showing_message_ ? hooks_.legend() : nullptr;
         if (lg && legend_.layer) {
             legend_shown_ = lg;
-            const char *title = "CONTROLS";
+            const char *title = txt::menu_controls;
             float kw = 0, aw = 0;
             for (const auto &r : *lg) {
                 kw = std::max(kw, text_w(row_f_, r.first.c_str()));

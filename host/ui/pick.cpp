@@ -9,6 +9,8 @@
 #endif
 
 #include "log.h"
+#include "text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::ui {
 
@@ -34,7 +36,7 @@ std::string name_of(const char *uri)
     }
     size_t cut = d.find_last_of("/:");
     std::string n = cut == std::string::npos ? d : d.substr(cut + 1);
-    return n.empty() ? std::string("the file") : n;
+    return n.empty() ? std::string(txt::pick_file) : n;
 }
 
 #ifdef __ANDROID__
@@ -88,7 +90,7 @@ void SDLCALL on_pick(void *, const char *const *files, int)
 {
     std::vector<Pick> picks;
     std::string error;
-    if (!files) error = std::string("The file picker failed: ") + SDL_GetError();
+    if (!files) error = fmt(txt::pick_failed, {{"error", SDL_GetError()}});
     else
         for (const char *const *f = files; *f; ++f) {
             std::string n;

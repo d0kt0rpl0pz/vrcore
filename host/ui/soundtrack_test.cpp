@@ -32,6 +32,8 @@
 #include "log.h"
 #include "settings.h"
 #include "soundtrack_page.h"
+#include "text.h"
+#include "ui/textstrings.h"
 
 namespace vrcore::ui {
 
@@ -396,9 +398,10 @@ void check_page(Report &r, const fs::path &dir)
     Driver d;
     Item top = soundtrack_item(d.menu);
     Page &pg = *top.sub;
-    Item *on = row(pg, "Custom soundtrack"), *next = row(pg, "Next"), *mode = row(pg, "Mode");
-    Item *tracks = row(pg, "Tracks"), *pl = row(pg, "Playlist");
-    r.check(on && next && mode && tracks && tracks->sub && pl && row(pg, "Volume"), "the page has its rows");
+    Item *on = row(pg, txt::soundtrack_on_label), *next = row(pg, txt::soundtrack_next);
+    Item *mode = row(pg, txt::soundtrack_mode_label);
+    Item *tracks = row(pg, txt::soundtrack_tracks_label), *pl = row(pg, txt::soundtrack_playlist_label);
+    r.check(on && next && mode && tracks && tracks->sub && pl && row(pg, txt::soundtrack_volume_label), "the page has its rows");
     if (!on || !next || !mode || !tracks || !tracks->sub || !pl) return;
     Page &tp = *tracks->sub;
     std::vector<Item *> track_rows;                     // the window's ten rows
@@ -473,7 +476,7 @@ void check_page(Report &r, const fs::path &dir)
         const lib::Track &t = alpha.tracks[want];
         if (track_rows.size() == 10) track_rows[want]->press();
         const bool got = d.until([&] { return saved_track(prefix) == t.file; }, 1000);
-        r.check(got && soundtrack_now_playing() == "Now playing: " + t.label(), "Tracks page: track %d (%s) is saved and announced (\"%s\")",
+        r.check(got && soundtrack_now_playing() == fmt(txt::soundtrack_now_playing_note, {{"title", t.label()}}), "Tracks page: track %d (%s) is saved and announced (\"%s\")",
                 want + 1, saved_track(prefix).c_str(), soundtrack_now_playing().c_str());
     }
     // a new playlist: the key names one of its files
@@ -502,7 +505,7 @@ void check_page(Report &r, const fs::path &dir)
         for (Item *it : track_rows)
             if (it->label_fn().rfind("* ", 0) == 0) marked = it->label_fn();
         r.check(playing && snd::status().list != list && joined &&
-                    soundtrack_now_playing() == "Now playing: 600 added" && marked.find("600 added") != std::string::npos,
+                    soundtrack_now_playing() == fmt(txt::soundtrack_now_playing_note, {{"title", "600 added"}}) && marked.find("600 added") != std::string::npos,
                 "a track added to the folder: played next, nothing stopped, saved, announced, marked (\"%s\")",
                 marked.c_str());
     }
@@ -569,9 +572,10 @@ void check_page(Report &r, const fs::path &dir)
         same = same && count_shown(tp) == n0;
         for (const Item &it : pg)
             if (it.label_fn && it.label_fn().size() > it.label.size()) fits = false;
+        const std::string showing(txt::soundtrack_showing, std::strcspn(txt::soundtrack_showing, "{"));   // "Showing "
         const Item *count = nullptr;
         for (const Item &it : tp)
-            if (it.label_fn && it.label_fn().rfind("Showing ", 0) == 0) count = &it;
+            if (it.label_fn && it.label_fn().rfind(showing, 0) == 0) count = &it;
         r.check(same && fits && long_shown && count && count->kind == Kind::Note,
                 "the Tracks window: %d rows at every scroll, a 100-character name within its row, the count a note", n0);
     }

@@ -1,0 +1,171 @@
+# textstrings.csv -- the headset UI wording the host shows (menus, messages, help lines).
+# Columns: id,en,note. The id is dotted lower case (soundtrack.shuffle.help); en is the text; note is context for
+# the editor and is not used. {slot} is filled by the program, {{ and }} are literal braces. Basic Latin only
+# (no curly quotes or dashes): the build stops on anything else. A line starting with # is a comment.
+# A line break inside a quoted en is a line break in the text (a file saved with CRLF reads the same).
+# The hint line's own marks: *word* is drawn as a key word (white, the rest muted) and | as a middle dot.
+id,en,note
+# ---- menu ----
+menu.return,Return,The row that goes back one page
+menu.confirm,Confirm {label},The button under a Confirm row
+menu.yes,Yes,A Confirm row's armed value and the Restart row. The Confirm value slot is as wide as the wider of Yes and No
+menu.no,No,A Confirm row's idle value and the Restart row. The Confirm value slot is as wide as the wider of Yes and No
+menu.restart.label,Restart game,The Restart row
+menu.restart.help,"Starts the game again from power-on, with the Gameplay settings applied. Set it to Yes, then press A.",Help line of the Restart row
+menu.reset,RESET,The small button after a stepper. Shown as written (the box is sized from it)
+menu.controls,CONTROLS,Heading of the controls box beside the panel (its width follows it)
+menu.version,v{version},The version at the panel's top right. {version} is the front's version text
+# ---- hint line under the help ----
+hint.keys,*Stick* move | *Left/right* or *A* change | *B* back | *Menu* close,The line with no controller shown. The widest hint; the panel is at least as wide
+hint.point,*Point* and pull the *trigger*,The start of the line while the pointer is in use
+hint.back,*B* back,Added after hint.point when a hand binds B. Also half of the widest pointer line
+hint.menu,*Menu* close,Added after hint.point when the left hand binds the menu button. Also half of the widest pointer line
+# ---- toggle rows ----
+toggle.on,On,The default on text of a toggle row
+toggle.off,Off,The default off text of a toggle row
+# ---- graphics rows ----
+graphics.profile.label,Graphics profile,
+graphics.profile.group,PROFILE,Title of the card holding the graphics rows
+graphics.profile.performance,Performance,
+graphics.profile.fidelity,Fidelity,
+graphics.profile.custom,Custom,
+graphics.rate.label,Refresh rate,
+graphics.rate.value,{hz} Hz,One refresh rate choice. {hz} is a whole number
+graphics.eye.label,Eye resolution,
+graphics.eye.value,x{v},The eye resolution stepper's value. {v} has one decimal. Its widest value sizes the slot
+graphics.foveation.label,Foveated rendering,
+graphics.foveation.off,Off,
+graphics.foveation.low,Low,
+graphics.foveation.medium,Medium,
+graphics.foveation.high,High,
+graphics.sharpen.label,Sharpening,
+graphics.sharpen.off,Off,
+graphics.sharpen.normal,Normal,
+graphics.sharpen.quality,Quality,
+# ---- file picker ----
+pick.failed,The file picker failed: {error},{error} is the system's own message
+pick.file,the file,Stands in for a picked file's name when none can be found
+# ---- soundtrack page ----
+soundtrack.default_label,Soundtrack,The soundtrack item's label when a front gives none
+soundtrack.on.label,Custom soundtrack,The toggle that opens the page
+soundtrack.on.help,Plays your own songs from Music/Soundtracks in place of the game's music.,
+soundtrack.status.asking,Waiting for the permission...,The status notes are cut at 44 characters: keep each under
+soundtrack.status.picking,Choosing a folder...,
+soundtrack.status.scanning,Looking for songs...,Used twice in the status text
+soundtrack.status.not_scanned,No songs scanned yet,
+soundtrack.status.gave_up,None of these tracks could be played,
+soundtrack.status.no_access,The Quest's music folder cannot be read,
+soundtrack.status.pick_lost,The chosen folder is no longer allowed,
+soundtrack.status.missing,No Music/Soundtracks folder found,
+soundtrack.status.empty,No songs in Music/Soundtracks,
+soundtrack.status.unreadable,The music folder could not be read,
+soundtrack.copy_hint,Copy songs over USB; a folder is a playlist,43 characters and not cut: at most 44 (the row is 44 characters wide)
+soundtrack.allow.label,Allow access to music,
+soundtrack.allow.help,Lets the game read your music folder. It is asked once.,
+soundtrack.playlist.label,Playlist,"The ""-"" shown when there is no playlist stays in code"
+soundtrack.tracks.label,Tracks,The row and the title of its page
+soundtrack.mode.label,Mode,
+soundtrack.mode.in_order,In order,
+soundtrack.mode.shuffle,Shuffle,Keep soundtrack.mode.help's wording alike
+soundtrack.mode.repeat_one,Repeat one,
+soundtrack.mode.help,"Shuffle plays every track once, in a random order, before any repeats.",Names soundtrack.mode.shuffle's text: keep them alike
+soundtrack.next,Next,
+soundtrack.previous,Previous,
+soundtrack.volume.label,Volume,
+soundtrack.volume.value,{v}%,"{v} is a whole number, 0 to 100"
+soundtrack.now_playing.label,Now playing,The toggle
+soundtrack.now_playing.help,Shows the song's name for a few seconds when it changes.,
+soundtrack.now_playing.note,Now playing: {title},"{title} is the track's name, cut to fit"
+soundtrack.earlier,Earlier tracks,The blank note and the action both use it (same row height and place)
+soundtrack.later,Later tracks,Same: the blank note and the action
+soundtrack.showing,Showing {first}-{last} of {count},25 characters at its longest (4-digit first and last); the sample row in soundtrack_page.cpp is that wide
+library.loose,All tracks,"The playlist of the loose files in the music folder. Also the name the page compares against, so it is one place"
+# ---- the thumbstick's choices (the rig; a front lists them in its rows) ----
+rig.response.linear,Linear,Response choices. Order matters: the saved value is the index
+rig.response.slight,Slight,
+rig.response.medium,Medium,
+rig.response.strong,Strong,
+rig.response.very_strong,Very Strong,
+rig.deadzone.off,Off,The deadzone at 0
+rig.percent,{v}%,A deadzone or range step. {v} is a whole number
+rig.range.full,100% (full lock),The range at 100. Rows hold 31 characters at most
+rig.time.instant,Instant,A turn or snap-back time of 0
+rig.time.ms,{ms} ms,A turn or snap-back time. {ms} is a whole number
+# ---- shifting on the right stick ----
+shifter.name.on,Right stick,The Shifter choice with the stick shifting
+shifter.name.off,Grips,The Shifter choice with the buttons only
+shifter.legend.key_h,"Right Stick, corners",The controls box: the key column for a four-speed H
+shifter.legend.key_seq,"Right Stick, up / down",The controls box: the key column for a lever
+shifter.legend.action_h,Gears 1-4 (H pattern),The controls box: the action column for a four-speed H
+shifter.legend.action_seq,Shift up / down,The controls box: the action column for a lever
+# ---- ROM messages (the panel is as wide as the widest line, so keep every line break where it is) ----
+# {player} is the set as the player reads it, with its article; {title} the game; {title_aside} the same for brackets;
+# {parent_title} the parent game; {zip} and {parent} the MAME zip names. A line break in en is a line break shown.
+roms.desktop_missing,"ROM Required to Start
+
+No {set} set at
+{path}","{set} the set's MAME name, {path} the folder looked in"
+roms.zip_damaged,"{zip} is damaged
+
+It could not be read as a zip file. Copy it to the
+headset again and choose it again.",{zip} the zip that could not be read
+roms.seven_z_unreadable,"{file} could not be read
+
+It is not {player} set, or it is damaged.
+Copy the set's zips to the headset's Download folder
+and choose them below.",{file} the 7z
+roms.required_one,"ROM Required
+
+This app does not include any copyrighted ROMs.
+You need {player} set, {zip}.
+Copy it to the headset's Download folder,
+then choose it below.",A set with no parent
+roms.required_split,"ROM Required
+
+This app does not include any copyrighted ROMs.
+You need {player} set: a non-merged
+{zip}, a merged {parent}, or {zip}
+and {parent}. Copy them to the headset's Download
+folder, then choose them below, one at a time.",First two lines as roms.required_one
+roms.unreadable,"The ROMs could not be read
+
+Copy them to the headset again and choose them again.",
+roms.parent_only,"{zip} needed
+
+You chose {parent}, the parent set. This game
+is {zip}, {title}. Copy it
+to the headset's Download folder and choose it below.",
+roms.parent_missing,"One more file needed: {parent}
+
+Your {zip} is a split set, which leaves out the
+files it shares with the parent, {parent_title}. They come
+in {parent}, from the same MAME ROM collection.
+Copy it to the headset's Download folder and choose it below.",
+roms.wrong.one,"Wrong ROM set
+
+This set is missing {file}
+(or has other versions of it). The game needs
+{player} ({title_aside}). Copy that
+set to the headset's Download folder and choose it below.",One file missing. Lines 4 on are the same in the three roms.wrong.* texts
+roms.wrong.two,"Wrong ROM set
+
+This set is missing {file} and 1 other file
+(or has other versions of them). The game needs
+{player} ({title_aside}). Copy that
+set to the headset's Download folder and choose it below.",Two files missing
+roms.wrong.many,"Wrong ROM set
+
+This set is missing {file} and {others} other files
+(or has other versions of them). The game needs
+{player} ({title_aside}). Copy that
+set to the headset's Download folder and choose it below.",More than two missing; {others} is the count less one
+roms.unchecked,{file} cannot be checked: the game lists no ROM files.,{file} the picked file's name
+roms.open_failed,Could not open {file}.,
+roms.not_zip,"{file} is not a zip file, or is damaged.",
+roms.not_set_split,{file} is not {zip} or {parent} (the MAME sets).,
+roms.not_set,{file} is not {zip} (the MAME set).,
+roms.copy_failed,Could not copy {file}: {error},{error} is the system's own message
+roms.pick.none,No file chosen.,
+roms.pick.open_failed,Could not open the file picker.,
+roms.pick.busy,Choose the file in the window that opened.,
+roms.pick.row,A:  Choose ROM file...,Two spaces after the colon; the marker byte in front stays in code
