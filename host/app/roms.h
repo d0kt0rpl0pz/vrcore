@@ -32,16 +32,16 @@ struct Note {
 };
 
 struct Set {
-    const char *name;           // MAME's short name ("daytona93")
-    const char *player;         // the set as the player reads it ("MAME's daytona93")
-    const char *title;          // the game ("Daytona USA ('93 version)")
-    const char *title_aside;    // the same in brackets after `player` ("Daytona USA, '93 version")
-    const char *seven_z;        // the 7z the set may come as ("daytona93.7z"; null: none): a picked .7z is taken as it
-    const char *zip;            // the game's own zip ("daytona93.zip")
+    const char *name;           // MAME's short name ("game93")
+    const char *player;         // the set as the player reads it ("MAME's game93")
+    const char *title;          // the game ("Game Title ('93 version)")
+    const char *title_aside;    // the same in brackets after `player` ("Game Title, '93 version")
+    const char *seven_z;        // the 7z the set may come as ("game93.7z"; null: none): a picked .7z is taken as it
+    const char *zip;            // the game's own zip ("game93.zip")
     const char *marker;         // a chip only the game's own zip holds: a picked zip with it is that zip
-    const char *parent_zip;     // the parent's zip ("daytona.zip"; null: the set has no parent)
+    const char *parent_zip;     // the parent's zip ("game.zip"; null: the set has no parent)
     const char *parent_marker;  // a chip only the parent's zip holds
-    const char *parent_title;   // the parent game ("Daytona USA")
+    const char *parent_title;   // the parent game ("Game Title")
     std::vector<Note> notes;
 };
 

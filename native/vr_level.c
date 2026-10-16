@@ -8,9 +8,9 @@
  * roll about the view axis, pitch about the horizontal one, either or both (VR_OPT_LEVEL).
  * The camera's position and heading stay the game's.
  *
- * The board gives the world's up in its camera's view space (System 22: the view matrix's
- * y row, namco22-decompile's engine/geo_hw.c geo_quad.wup) and applies the rotation to the
- * corners it chooses, when it chooses (Rave Racer: world objects only, while a course is
+ * The board gives the world's up in its camera's view space (for example the view matrix's
+ * y row) and applies the rotation to the
+ * corners it chooses, when it chooses (for example world objects only, while a course is
  * on screen). A frame drawn between two game frames needs each
  * frame's corners under that frame's own camera: one matrix from this frame's up, one
  * from the last's.

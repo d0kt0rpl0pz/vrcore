@@ -3,7 +3,7 @@
  * playback stream at the device's own rate, fed on SDL's audio thread by a game's pull (a plugin's vr_audio),
  * then spatialised: the pulled stream's channels (Layout) are speakers fixed in the SEAT's frame, rendered
  * binaurally by Steam Audio for the head's pose in that frame (spatial.h), and DIRECT channels, straight to the
- * ears (locked to the head: Daytona's music). Off (set_spatial(false)): the stream is pulled 2 wide, the game's
+ * ears (locked to the head: a game's music). Off (set_spatial(false)): the stream is pulled 2 wide, the game's
  * own stereo mix, and goes out as it is, bit for bit. Either way the player's own music (soundtrack.h) is added
  * last, locked to the head, while it plays; silent, it leaves the block alone.
  *

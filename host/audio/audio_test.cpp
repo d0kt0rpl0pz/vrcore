@@ -4,7 +4,7 @@
  * plain stereo) at set head poses. No device, no plugin, nothing played. One line a check in <dir>/audio_test.txt,
  * the renders as WAVs beside it (to listen to), a summary in the log.
  *
- * The speakers are Daytona's pair, left channel at (-0.50, -0.10, -0.50) m, right mirrored, unless a check says.
+ * The speakers are a typical pair, left channel at (-0.50, -0.10, -0.50) m, right mirrored, unless a check says.
  */
 #include "audio_test.h"
 

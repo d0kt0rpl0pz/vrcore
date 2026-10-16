@@ -19,7 +19,7 @@ bool g_busy = false, g_done = false;
 std::vector<Pick> g_picks;
 std::string g_error;
 
-// the URI's last part, %-decoded (Android: when the provider gives no name): "content://.../document/primary%3ADownload%2Fdaytona93.zip" -> daytona93.zip
+// the URI's last part, %-decoded (Android: when the provider gives no name): "content://.../document/primary%3ADownload%2Fgame.zip" -> game.zip
 std::string name_of(const char *uri)
 {
     std::string d;

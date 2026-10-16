@@ -20,8 +20,8 @@ extern "C" {
  * when group, world and id are all equal, except that an object left alone may take a
  * partner of another id in the same group and world (a level-of-detail switch). */
 typedef struct {
-    int32_t group;          /* the window it is drawn in (System 22: the viewport record) */
-    int32_t id;             /* its model (System 22: the model code) */
+    int32_t group;          /* the window it is drawn in (for example a viewport record) */
+    int32_t id;             /* its model (for example a model code) */
     int     world;          /* 1: seen through the camera; 0: fixed to the view (a HUD object) */
     double  pos[3];         /* its translation BEFORE the view: camera-relative, in world axes */
     double  rot[3][3];      /* its rotation in view space (object x view), unit scale */

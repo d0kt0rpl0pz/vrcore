@@ -1,7 +1,7 @@
 /*
  * rig_test.cpp -- the rig's device-free checks, run by `--rig-test <dir>` before any host starts.
  *
- * THE WHEEL's are at the Daytona wheel's full lock 27306. The stick's, the shifter's and the rumble's test the
+ * THE WHEEL's are at a wheel's full lock of 27306. The stick's, the shifter's and the rumble's test the
  * maths (Stick::shape / damp / to_game / steer, Shifter::lever / corner / read over a made-up snapshot, Rumble through
  * its output seam, so no controller is touched). One line a check in <dir>/rig_test.txt, then a summary in the log.
  */
@@ -31,7 +31,7 @@ namespace rig {
 
 namespace {
 
-constexpr int kFull = 27306;                // Daytona's steering where its curve goes flat (WheelFullLock)
+constexpr int kFull = 27306;                // a game's steering where its curve goes flat (WheelFullLock)
 const float kDeg2Rad = 0.0174532924f;
 
 struct Report {
@@ -302,7 +302,7 @@ void stick_checks(Report &r)
         r.check(sel == 32767 && k.range == 50 && k.fullLock == kFull && race == Stick::to_game(0.5f, 1877, kFull),
                 "stick selects: range 50%% still reaches 32767 (%d), the race's next frame %d", sel, race);
     }
-    // ToGame: Daytona's dead band 1877 and flat at 27306
+    // ToGame: a game's dead band 1877 and flat at 27306
     r.check(Stick::to_game(0.f, 1877, kFull) == 0, "stick to_game: 0 stays 0");
     r.check(Stick::to_game(1e-9f, 1877, kFull) == 1878 && Stick::to_game(-1e-9f, 1877, kFull) == -1878,
             "stick to_game: anything past 0 starts at dead + 1 (1878)");

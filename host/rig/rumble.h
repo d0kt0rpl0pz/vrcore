@@ -14,14 +14,14 @@
  * dropped, for the game too (`used` comes back 0): it does not vibrate again when it returns until it gives an
  * input.
  *
- * THE SPRING (optional, off unless `spring`). Rave Racer's cabinet torque, felt as vibration, for a game whose
- * board sends no steering torque (Daytona's drive board sends only contacts and a coarse weight). Rave Racer's
+ * THE SPRING (optional, off unless `spring`). A cabinet's centring torque, felt as vibration, for a game whose
+ * board sends no steering torque (another drive board sends only contacts and a coarse weight). The cabinet's
  * own torque is a centring spring: 0 straight ahead, rising quickly with the steering and saturating at 27 of 63
  * at either lock, stiffer with speed. Here: SpringMax * (1 - (1 - |steer|)^2) * (SpringFloor + (1 - SpringFloor)
  * * speed), the steering's share easing out (0.75 at half lock). The game gives the steering it sent (steer,
  * -1..1, the hand wheel's or a pad's) and the car's speed (speed, 0..1 of its top; negative: full; 0 outside a
  * race keeps the attract quiet). It is felt in both hands and layered on the game's strength: each hand (or the
- * pad) gets the stronger of the two, so a contact still stands out above it. Rave Racer leaves it off: its
+ * pad) gets the stronger of the two, so a contact still stands out above it. A game with that torque leaves it off: its
  * strength is the torque itself.
  *
  * THE PULSE (pulse): a one-off strength for a moment, on a side (a lever going into gear, the shifter's tick).
@@ -61,7 +61,7 @@ public:
     Rumble();
     void set_out(const Out &o) { out_ = o; }
 
-    // the spring: on (the game's menu choice); its strength at full lock and full speed (Rave Racer's 27 of 63),
+    // the spring: on (the game's menu choice); its strength at full lock and full speed (27 of 63, say),
     // and the share of that left at a standstill
     bool spring = false;
     float SpringMax = 27.f / 63.f, SpringFloor = 0.25f;

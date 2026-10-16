@@ -30,7 +30,7 @@ extern "C" {
 
 /* ---- identity ---------------------------------------------------------- */
 VR_API int         vr_abi_version(void);    /* VR_ABI_VERSION the plugin was built with */
-VR_API const char *vr_game(void);           /* the game's short name ("raverace"), static */
+VR_API const char *vr_game(void);           /* the game's short name ("mygame"), static */
 VR_API int         vr_vertex_floats(void);  /* floats per vertex of vr_frame (the board's layout) */
 
 /* ---- the game thread ---------------------------------------------------- */
@@ -104,8 +104,8 @@ VR_API void vr_set_world(int world3d, int keep_behind);
 /* ---- vertices ------------------------------------------------------------ *
  * A vertex is vr_vertex_floats() floats, the first VR_VERT_FLOATS of them laid out as
  * vr_vert: a COMMON part, the same on every board, and a BOARD BLOCK of ten floats between
- * its fields -- the board's material, which only its own shader reads (System 22: u, v and
- * brightness, pen, sub-pens, texture bank, fog; the game documents it beside its plugin and
+ * its fields -- the board's material, which only its own shader reads (for example u, v and
+ * brightness, palette index, texture bank, fog; the game documents it beside its plugin and
  * gives the block's floats its own names in a struct of the same layout). A board that
  * needs more than ten appends them after float 20 (TEXCOORD5 on) and says so in
  * vr_vertex_floats. The split is by attribute slot, not a prefix, so a mesh takes the
@@ -145,7 +145,7 @@ enum { VR_V_BOARD = 7,
 /* ---- options ------------------------------------------------------------- *
  * Applied on the game thread at its next frame; set before vr_start they take effect as it
  * runs. get: the value in force, -1 = never set / not this game's. Keys below 100 are the
- * shared ones here or the game's older ones (Rave Racer's); new game keys start at 100. */
+ * shared ones here or the game's older ones; new game keys start at 100. */
 enum { VR_OPT_FREEPLAY = 1,                 /* 0/1 */
        VR_OPT_DRAW_EXTRA = 2,               /* draw distance: extra, 0 = the original */
        VR_OPT_VOLUME = 3,                   /* 0..100, the whole mix */
@@ -160,7 +160,7 @@ VR_API void vr_set_option(int key, int value);
 VR_API int  vr_get_option(int key);
 
 /* ---- health -------------------------------------------------------------- */
-/* the game frame and three counters that must stay 0 (the game names them: Rave Racer's are
+/* the game frame and three counters that must stay 0 (the game names them: for example
  * traps, unmapped accesses, ROM writes) */
 VR_API void vr_stats(uint32_t *frame, uint32_t *c0, uint32_t *c1, uint32_t *c2);
 /* drawing between frames, totals since start: frames, objects, matched, world objects, world

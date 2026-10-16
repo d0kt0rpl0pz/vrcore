@@ -171,7 +171,7 @@ Item note(const std::string &widest, std::function<std::string()> text);
 Item confirm(const std::string &label, std::function<void()> run);
 
 
-// A front's box beside the panel (Daytona's records), drawn on the menu's
+// A front's box beside the panel (a records table, say), drawn on the menu's
 // background and border with the menu's margin round it. The boxes of a side run outwards in the order given, each kHinge
 // (3 cm) past the last, the row curving round you: the first turned 30 degrees in (PLACEMENT), each further stretch
 // (a box, or a box's gap) 30 more. The right side's start after CONTROLS.
@@ -179,7 +179,7 @@ struct Box {
     bool left = true;                       // hinged on the panel's left edge (else its right, after CONTROLS)
     uint32_t max_width = 1024, max_height = 1024;   // its layer's pixels: the largest it can be, margins included
     // Metres left empty before it in its row, a stretch of its own (turned as a box would be), kept also while it
-    // is not shown: room for something of the front's own (Rave Racer's Reiko stands there).
+    // is not shown: room for something of the front's own (a character of its own stands there, say).
     float gap = 0;
     // Its contents' size in metres this frame; false: not shown (nothing to show yet).
     std::function<bool(float &width_m, float &height_m)> measure;

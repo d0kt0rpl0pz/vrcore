@@ -1,7 +1,7 @@
 /*
  * layers.h -- a front's quad layers: a picture on a rectangle in the room, drawn by the headset's compositor
  * (OpenXR's XR_KHR_composition_layer_quad: its own swapchain, sampled once straight to the display, at no cost
- * to the eye pass): Daytona's HUD panel and screen. In the sim (no compositor) each
+ * to the eye pass): a HUD panel and a screen, say. In the sim (no compositor) each
  * is a textured quad drawn in the eye pass after the front's draw, over everything (no depth test).
  *
  *   at init:      Layer *l = layer_create(r, {width, height, opaque});

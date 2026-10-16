@@ -1,7 +1,7 @@
 /*
  * stick.h -- steering with a thumbstick, shaped: a deadzone, a response curve, a range and a wheel's damping, as
  * five menu choices (ported as it is). A game's option, for a game whose own steering maps the stick
- * straight onto the cabinet's wheel (Daytona: the whole of a 270-degree wheel, lock to lock, on about 13 mm of
+ * straight onto the cabinet's wheel (for example the whole of a 270-degree wheel, lock to lock, on about 13 mm of
  * thumb travel, linearly). The hand wheel (wheel.h) is a separate path and is never shaped here.
  *
  * THE CHAIN, the stick's X only (-1..1), in this order:
@@ -17,7 +17,7 @@
  * THE GAME'S OWN CURVE. A game's steering can have a dead band at centre and go flat before 32767. The game gives
  * both (gameDead, fullLock: steering values, as the wheel's fullLock), and the output is laid between them: anything
  * past 0 starts just outside the game's dead band, and 1 is the game's full lock. So this deadzone and range are
- * the only ones in force, and Deadzone Off really is off. Daytona: dead band +-5 ADC counts, flat past 80 of 96
+ * the only ones in force, and Deadzone Off really is off. For example: dead band +-5 ADC counts, flat past 80 of 96
  * (steer 27,306).
  *
  * THE DEFAULTS: Medium, 2%, 80%, 150 ms each way (Modelizer's range and damping, played on a pad). Damping is in

@@ -1,10 +1,10 @@
 # vrcore: the VR host. A self-contained project (MIT, no game includes): a game's front
 # links the host static library through vrcore_add_app() and gets an app target.
 #
-#   Mac desktop:  cmake -S vrmodel/vrcore -B build-native -G Ninja [-DVRCORE_FRONT_DIR=<a game's front>]
+#   Mac desktop:  cmake -S <this folder> -B build-native -G Ninja [-DVRCORE_FRONT_DIR=<a game's front>]
 #                 cmake --build build-native        -> build-native/vrcore_scene (the sim), and the front's app
-#   Quest APK:    vrmodel/build-android.sh apk      (Gradle runs this file through
-#                                                    externalNativeBuild, arm64-v8a)
+#   Quest APK:    the game's Android build script  (Gradle runs this file through
+#                                  externalNativeBuild, arm64-v8a)
 #
 # VRCORE_FRONT_DIR: a game's front, a folder whose CMakeLists.txt calls vrcore_add_app(); on Android its
 # app is the APK's libmain.so (in place of the test scene's).
@@ -46,7 +46,7 @@ endforeach()
 
 # Steam Audio (Apache-2.0): the release's prebuilt libphonon, required (HRTF for the cabinet speakers).
 # Shared: the Mac dylib (install name @rpath/libphonon.dylib, so the apps get its folder as build rpath)
-# and the arm64 .so, which build-android.sh copies into the APK's lib/arm64-v8a.
+# and the arm64 .so, which the game's Android build script copies into the APK's lib/arm64-v8a.
 set(VRCORE_PHONON_DIR ${VRCORE_EXTERN_DIR}/steam-audio/steamaudio)
 if(NOT EXISTS ${VRCORE_PHONON_DIR}/include/phonon.h)
     message(FATAL_ERROR "vrcore: no Steam Audio at ${VRCORE_EXTERN_DIR}/steam-audio (run tools/fetch_extern.py)")

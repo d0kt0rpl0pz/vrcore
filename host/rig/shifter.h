@@ -5,10 +5,10 @@
  * is free for this.
  *
  * THE GATES, by the game's gearbox (Mode):
- *   Sequential  a lever that goes up and down (Rave Racer): gate +1 while the stick is pushed up (shift up), -1
+ *   Sequential  a lever that goes up and down (a racing lever): gate +1 while the stick is pushed up (shift up), -1
  *               while pushed down (shift down), 0 at rest. The game holds its shift bit while the gate is held;
  *               the game edges the lever itself.
- *   HGate4      a four-speed H (Daytona's lever): the corners are the gears, 1 up-left, 2 down-left, 3 up-right,
+ *   HGate4      a four-speed H (a four-gear lever): the corners are the gears, 1 up-left, 2 down-left, 3 up-right,
  *               4 down-right. Gate 1..4 while the stick is in that corner, 0 elsewhere. The game holds its
  *               direct-gear action while the gate is held; its gearbox latches, so the gear stays once the stick
  *               is let go, as the real lever's does. The edges between the corners (straight up, down, left,

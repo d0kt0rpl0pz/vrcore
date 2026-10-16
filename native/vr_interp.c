@@ -1,14 +1,14 @@
 /*
  * vr_interp.c -- where each object of this game frame was one frame earlier.
  *
- * An arcade board runs at its own rate (System 22 59.906 Hz, Model 2 57.524 Hz); a headset
+ * An arcade board runs at its own rate (59.906 Hz or 57.524 Hz, say); a headset
  * draws at 72-120 Hz. Between two game frames a renderer draws each corner part-way from
  * where it was to where it is: every vertex carries where it was one game frame earlier.
  * A board's display list says nothing about identity from frame to frame, so this pairs
  * each object of this frame with one of the last:
  *
- *   THE KEY: (group, world, id) -- System 22: (viewport record, under a view transform,
- *   model code); Model 2: (window, polygon-data address). Only objects with the same key
+ *   THE KEY: (group, world, id) -- for example (viewport record, under a view transform,
+ *   model code) or (window, polygon-data address). Only objects with the same key
  *   can be the same object.
  *   THE POSITION: an object's translation BEFORE the view (vr_interp_obj.pos) is camera-
  *   relative in world axes, so between two frames every static object's moves by the
@@ -16,7 +16,7 @@
  *   move is the median over all world objects paired by occurrence, then again over
  *   the pairs found; what is left (the residual) is the object's own motion.
  *   Candidates within the match limit of that residual are taken nearest first. A
- *   game that appends pieces relative to the player (Rave Racer's track, rd_b2.c) shifts
+ *   game that appends pieces relative to the player (a racing game's track, say) shifts
  *   the order when a piece boundary is crossed; a level-of-detail switch changes the id
  *   and is matched across ids when nothing else is left (below).
  *
@@ -24,8 +24,7 @@
  * caller says so, or when the camera moved or turned further in one frame than it
  * honestly can (a cut), or when fewer than a quarter of the world objects found a partner.
  *
- * The board keeps its own copy of each object's transform (its adapter: System 22's is
- * namco22-decompile's engine/frame_interp.c) and places the matched object's corners
+ * The board keeps its own copy of each object's transform (its adapter) and places the matched object's corners
  * again in its own arithmetic. VR_INTERP_LOG=1 prints every frame's matching to stderr;
  * VR_INTERP_DUMP=<frame> also lists the objects of three frames from that one.
  */

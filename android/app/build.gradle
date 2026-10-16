@@ -2,7 +2,7 @@ plugins {
     id 'com.android.application'
 }
 
-// Passed by vrmodel/build-android.sh apk (see there for the defaults).
+// Passed by the game's Android build script (see there for the defaults).
 def sdlDir = file(project.findProperty('vrcoreSdl') ?: "$rootDir/../../../extern/sdl3")
 def externDir = file(project.findProperty('vrcoreExtern') ?: "$rootDir/../../../extern")
 // A game's front (CMakeLists.txt calling vrcore_add_app: the APK's libmain.so; none: the test scene) and a

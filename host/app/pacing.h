@@ -2,7 +2,7 @@
  * pacing.h -- which game frame a front draws on each display frame, and how far between it and the one before
  * (alpha). Any board's front uses it.
  *
- * BETWEEN GAME FRAMES. A board runs at its own rate (System 22 59.906 Hz, Model 2 57.524 Hz) and a headset
+ * BETWEEN GAME FRAMES. A board runs at its own rate (59.906 Hz or 57.524 Hz, say) and a headset
  * draws at 72-120 Hz. Every 3D vertex carries where it was one game frame earlier (abi/vrcore.h's prev), and
  * the board's shader draws lerp(prev, pos, alpha). This picks the frame and the alpha for each display frame:
  * a RENDER CLOCK runs on the plugin's own clock (vr_now_ns, the one the frames are stamped with) a game frame
