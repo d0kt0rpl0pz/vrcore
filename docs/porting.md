@@ -209,7 +209,10 @@ while selected) on it and push it into a page:
 | Builder | Row | D-pad / keys | Pointer |
 |---|---|---|---|
 | `toggle(label, get, set, on, off)` | On / Off | left / right or A flips | a click anywhere on the row flips it |
+| `checkbox(label, get, set)` | a box with no word beside it | left / right or A flips | a click anywhere on the row flips it |
 | `choice(label, labels, get, set)` | one of a list | left / right cycles | a click opens a dropdown under the value |
+| `segmented(label, labels, get, set)` | one of two to four short options, all shown in a strip | left / right moves, stopping at the ends | a click on a segment picks it |
+| `segmented_toggle(label, get, set, first, second)` | a bool with two named states, as a strip | left picks `first`, right `second` | a click on a segment picks it |
 | `stepper(label, get, set, step, lo, hi, format, reset)` | a number | left / right steps, A resets | `<` `>` halves step, held repeats; a Reset button when `reset` is given |
 | `action(label, fn)` | a button row | A runs it | a click runs it |
 | `page(label, sub)` | a sub page | A enters | a click enters |
@@ -305,19 +308,32 @@ message panel is up (left button the trigger, `P` pretends a gamepad was pressed
 ### The soundtrack page
 
 The player's own music, played by the host in place of the game's, with a page to choose it (`ui/soundtrack_page.h`).
-No plugin export or ABI call is involved: the host mixes it after the game's sound, locked to the head. A front adds
-one row and three calls:
+No plugin export or ABI call is involved: the host mixes it after the game's sound, locked to the head, and brings
+its wording (`host/ui/textstrings.csv`) and the Android permission (`READ_MEDIA_AUDIO`, in vrcore's manifest). The
+whole of a front's part, ready to paste (`prefix`, `volume`, `music`, `menu` and `send_options` are the front's own):
 
 ```cpp
-ui::soundtrack_load(hooks);                 // AppInfo::load_settings, after settings::open
-top.push_back(ui::soundtrack_item(menu));   // the "Soundtrack" row, where the front builds its top page
-h.on_open = [] { ui::soundtrack_menu_opened(); };         // ui::Hooks: scan the folder again
-ui::soundtrack_update(menu, tick, input);   // every update, after menu.update
+#include "ui/soundtrack_page.h"
+
+// AppInfo::load_settings, after settings::open
+ui::SoundtrackHooks sh;
+sh.prefix = "xx.";                                    // the front's key prefix: saved as xx.soundtrack.*
+sh.options_changed = [] { send_options(); };          // soundtrack_replacing() flipped: send the music volume again
+sh.master_volume = [] { return args.volume; };        // VR_OPT_VOLUME's value; the soundtrack sits under it
+ui::soundtrack_load(sh);
+
+// where the front builds its top page
+top.push_back(ui::soundtrack_item(menu));             // the "Soundtrack" row and the pages it opens
+
+// wherever the front sends the game its options
+plugin.set_option(VR_OPT_MUSIC_VOL, ui::soundtrack_replacing() ? 0 : args.music);
 ```
 
-`SoundtrackHooks::options_changed` is called when `ui::soundtrack_replacing()` flips; the front sends the game
-`VR_OPT_MUSIC_VOL` 0 while it is true and the player's saved music volume otherwise (so the game only has to honour
-that option). `master_volume` gives VR_OPT_VOLUME's value; the soundtrack sits under it.
+The row attaches the page to the menu (`Menu::attach`, `ui/menu.h` ATTACHED): `menu.update` runs the music and
+`menu.open` scans the folder again, so there is nothing to call each frame. (`ui::soundtrack_update` and
+`ui::soundtrack_menu_opened` stay public for the self-test; a front that still calls them as well runs each once a
+frame.) The plugin's only part is to honour `VR_OPT_MUSIC_VOL` (0 silences the game's music); a game that cannot separate its
+music from its effects plays both under the player's songs. `host/test/menu_front.cpp` is a working example.
 
 The songs are in `Music/Soundtracks` in the headset's shared storage (`~/Music/Soundtracks` in the sim); each subfolder
 is a playlist and loose files make "All tracks" (saved as an empty name, so a folder called that is its own

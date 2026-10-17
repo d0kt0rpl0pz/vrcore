@@ -68,6 +68,9 @@ struct State {
     double retry_at = 0;                    // when a saved-on start that did not take is tried again
     int window = 0;                         // the Tracks page's first row (a track index)
     double now = 0, note_until = 0;
+    // a front that still makes the menu's calls by hand as well: each runs once a frame (stepped_ns: the last
+    // update's frame; opened_ns: the frame of the last open's scan)
+    int64_t stepped_ns = -1, opened_ns = -2;
     std::string note;
     std::mt19937 rng{(unsigned)std::chrono::steady_clock::now().time_since_epoch().count()};
 };
@@ -526,11 +529,19 @@ void soundtrack_load(const SoundtrackHooks &hooks)
 Item soundtrack_item(Menu &menu, const char *label)
 {
     build_pages(menu);
+    // the menu makes the page's calls itself (menu.h ATTACHED)
+    Menu::Attached a;
+    a.on_open = [] {
+        if (g.opened_ns != g.stepped_ns) soundtrack_menu_opened();
+    };
+    a.update = [&menu](const Tick &t, const Input &in) { soundtrack_update(menu, t, in); };
+    menu.attach("soundtrack", std::move(a));
     return page(label, g_page);
 }
 
 void soundtrack_menu_opened()
 {
+    g.opened_ns = g.stepped_ns;
     // scanned each time the menu opens, but only a way in that is already there: the permission is asked for by
     // its row, never here
     if (lib::scan()) g.wanted_scan = false;
@@ -545,6 +556,8 @@ bool soundtrack_replacing() { return g.replacing; }
 
 void soundtrack_update(Menu &menu, const Tick &t, const Input &in)
 {
+    if (t.display_ns == g.stepped_ns) return;
+    g.stepped_ns = t.display_ns;
     g.now = (double)t.display_ns * 1e-9;
 
     // at launch: a saved-on soundtrack is scanned for, once, when the folder can be read without asking

@@ -50,12 +50,20 @@
  * always did, and the pointer's click on it is A. The builders below set a kind (and its data) on top of the same
  * value / change / press / sub fields, so the d-pad, stick, keyboard and A / B do exactly what they did for every
  * kind; only the pointer and the picture differ:
- *   toggle    a click anywhere on the row flips it. It keeps both texts (`choices` = {on, off}, `index` 0 on / 1 off) so
- *             it can be drawn "current / other"; a front that replaces its `value` gets that value drawn alone.
+ *   toggle    a click anywhere on the row flips it. One box, filled while on. It keeps both texts (`choices` = {on,
+ *             off}, `index` 0 on / 1 off): an on / off pair (the off text starts "Off") always reads its on
+ *             text beside the box, any other pair ("Full" / "Arcade") reads the current one. A front that replaces
+ *             `value` keeps that word; what it adds after either text ("Off (Requires Restart)") follows muted, and a
+ *             value starting with neither is drawn alone.
  *             Only a Choice opens a dropdown: `choices` alone does not make one.
  *   choice    `v` beside the value; a click opens a dropdown under it (pointer only; the d-pad cycles as before);
  *             click a choice, or outside, or B, to leave it. The room for the list is reserved when the page is
  *             entered (SIZES), the list hangs over the rows below it.
+ *   segmented every choice side by side in one outlined strip, the current one filled; a click on a segment picks it
+ *             (no dropdown), left / right moves to the next or previous one and stops at the ends. Same fields as a
+ *             Choice (`choices`, `index`, `pick`). For two to four short labels; a longer list is a Choice.
+ *             A `value` that reads the current label and more ("MPH (Requires Restart)") draws the rest muted after
+ *             the strip, `reserve` keeping room for it.
  *   stepper   `<` `>` either side of the value; a click on its left or right half steps by one, a held trigger
  *             repeats (0.35 s, then every 0.12 s). With a reset: a small Reset button after it, which does what A does.
  *   action    a click runs it         page   `>` at the end, a click enters it         return   a click is B
@@ -117,7 +125,7 @@ struct Item;
 using Page = std::vector<Item>;
 
 // How an Item behaves under the pointer and how it is drawn (THE ROW KINDS). Legacy: built the old way.
-enum class Kind : uint8_t { Legacy, Toggle, Choice, Stepper, Action, Page, Return, Confirm, Note };
+enum class Kind : uint8_t { Legacy, Toggle, Choice, Stepper, Action, Page, Return, Confirm, Note, Segmented };
 
 struct Item {
     std::string label;
@@ -160,6 +168,16 @@ Item choice(const std::string &label, std::vector<std::string> labels, std::func
             std::function<void(int)> set);
 // A number from `lo` to `hi` in steps of `step` (left / right and the pointer's halves move it one step); `format`
 // writes it. `reset` (optional) is what A does and what the Reset button runs.
+// A toggle drawn as its box alone, no word beside it (the label says what it is). A front that replaces `value`
+// (a "Requires Restart" note) returns "" for on and "Off" for off in place of the words.
+Item checkbox(const std::string &label, std::function<bool()> get, std::function<void(bool)> set);
+// A Choice drawn as a strip of segments, every label visible (THE ROW KINDS): for two to four short options.
+Item segmented(const std::string &label, std::vector<std::string> labels, std::function<int()> get,
+               std::function<void(int)> set);
+// A toggle whose two states are named options ("Hands" / "Thumbstick"), drawn as a strip: `first` is the segment for
+// true, `second` for false (a plain On / Off stays a toggle). Takes a toggle's arguments, so a front changes one name.
+Item segmented_toggle(const std::string &label, std::function<bool()> get, std::function<void(bool)> set,
+                      const char *first, const char *second);
 Item stepper(const std::string &label, std::function<float()> get, std::function<void(float)> set, float step,
              float lo, float hi, std::function<std::string(float)> format, std::function<void()> reset = nullptr);
 Item action(const std::string &label, std::function<void()> run);
@@ -267,7 +285,17 @@ public:
     // The Return row (Kind::Return): a click or A goes back a page (the top page: closes the menu).
     Item return_item();
 
+    // ATTACHED: what a ready-made row brings along (ui/soundtrack_page.h's), so a front adds the row and nothing
+    // else. `on_open` runs on each open, after Hooks::on_open; `update` after each update. One per `id`: attaching
+    // the same id again (pages built again) replaces it.
+    struct Attached {
+        std::function<void()> on_open;
+        std::function<void(const Tick &, const Input &)> update;
+    };
+    void attach(const char *id, Attached a);
+
 private:
+    void step(const Tick &t, const Input &in);
     void off_notes(int step);
     bool list_visible();
     struct Plan;
@@ -341,6 +369,7 @@ private:
         // x edges in the panel's pixels (-1: none): the stepper's `<` start and `>` end, its Reset button, the
         // Confirm button, the value's start and end (a choice's box: the dropdown hangs from it)
         float dec0 = -1, inc1 = -1, reset0 = -1, reset1 = -1, conf0 = -1, conf1 = -1, val0 = -1, val1 = -1;
+        std::vector<float> seg;             // a segmented row: the x edges, one more than its segments
     };
     std::vector<RowRect> rows_;
     int hit_id_ = -1;                       // the quad under the ray (-1 none)
@@ -389,6 +418,7 @@ private:
     class ImguiRender *render_ = nullptr;
     gpu::Renderer *gpu_ = nullptr;          // init's, for the controller models a profile change loads
     const Legend *legend_shown_ = nullptr;
+    std::vector<std::pair<std::string, Attached>> attached_;
 };
 
 }

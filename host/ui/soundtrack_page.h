@@ -1,14 +1,16 @@
 /*
  * soundtrack_page.h -- the Soundtrack page: the player's own music (audio/soundtrack.h, played from the folder
- * audio/library.h scans) chosen from a menu page every game gets the same way. A front adds one row to its top
- * menu and makes three calls; the host does the rest, and no plugin export or ABI call is involved (the soundtrack
- * is mixed after the game's sound).
+ * audio/library.h scans) chosen from a menu page every game gets the same way. A front loads it, adds one row to
+ * its top menu and sends the game's music volume as below; the host does the rest, and no plugin export or ABI call
+ * is involved (the soundtrack is mixed after the game's sound).
  *
  *   soundtrack_load(hooks)            AppInfo::load_settings (the settings are open): the saved choices read.
- *   soundtrack_item(menu)             the "Soundtrack" row for the top page (it builds the pages it opens).
- *   soundtrack_menu_opened()          Hooks::on_open: the folder is scanned again (never asking for anything).
- *   soundtrack_update(menu, t, in)    every update: the library's answers, the music's start and its fades when the
- *                                     headset loses focus, the "now playing" line.
+ *   soundtrack_item(menu)             the "Soundtrack" row for the top page (it builds the pages it opens) and
+ *                                     attaches the next two to the menu (menu.h ATTACHED), so a front calls neither.
+ *   soundtrack_menu_opened()          on each open: the folder is scanned again (never asking for anything).
+ *   soundtrack_update(menu, t, in)    after each menu update: the library's answers, the music's start and its
+ *                                     fades when the headset loses focus, the "now playing" line. Both run once a
+ *                                     frame however often they are called (a front that still calls them too).
  *   soundtrack_replacing()            true while the player's music stands in for the game's: the front sends the
  *                                     game VR_OPT_MUSIC_VOL 0 then (its saved volume otherwise) and does so again
  *                                     when hooks.options_changed is called.

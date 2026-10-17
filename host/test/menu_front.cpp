@@ -11,7 +11,7 @@
  * cards (menu.h CARDS): every page is grouped, titled by `group` (Graphics' PROFILE card comes from ui/graphics.h and
  * shows the profile), the top page's by gaps alone, untitled, and the Return row under the cards; Graphics' PICTURE
  * card starts on Sharpening where the headset offers it, else on Glass shader. A toggle with its own texts
- * (Gameplay's Mode, "Full" / "Arcade", drawn "current / other"); a toggle whose value the front replaces (Traffic,
+ * (Gameplay's Mode, "Full" / "Arcade", reading the current text); a toggle whose value the front replaces (Traffic,
  * which adds " (Requires Restart)" once changed, `reserve` and Hooks::value_reserve keeping the room); and a Note
  * (the UI page's, shown while the HUD is off, which the cursor skips).
  *
@@ -162,7 +162,9 @@ Item tenths(const char *label, float &field, const char *key, float lo, float hi
 
 Item option(const char *label, std::vector<std::string> names, int &field, const char *key, const char *help = nullptr)
 {
-    return with(ui::choice(
+    // two to four short names read best as a strip; more open a dropdown
+    auto build = names.size() <= 4 ? ui::segmented : ui::choice;
+    return with(build(
                     label, std::move(names), [&field] { return field; },
                     [&field, key](int v) {
                         field = v;
@@ -278,7 +280,7 @@ void build_pages(Pages &p, const Options &o)
 
     // Gameplay
     p.gameplay.push_back(titled(flag("Free play", args.free_play, "ms.freeplay"), "RULES"));
-    // a toggle with its own texts, drawn "current / other"
+    // a toggle with its own texts, reading the current one beside the box
     p.gameplay.push_back(ui::toggle(
         "Mode", [] { return args.full_mode; },
         [](bool v) {
@@ -405,7 +407,6 @@ bool front_init(gpu::Renderer &r, const Options &o)
     h.legend = []() -> const Legend * { return &kControls; };
     h.version = "sample";
     h.value_reserve = " (Requires Restart)";
-    h.on_open = [] { ui::soundtrack_menu_opened(); };
     if (front.message) {
         h.message = [] { return std::string("The game's files were not found.\nPut them in the folder below, or pick another."); };
         h.pick = [](bool select) {
@@ -433,7 +434,6 @@ void front_update(const Tick &t)
             log("menu: no page starting with \"%s\"", front.start_page.c_str());
     }
     front.menu.update(t, in);
-    ui::soundtrack_update(front.menu, t, in);
 }
 
 void front_prepare(gpu::Frame &f)

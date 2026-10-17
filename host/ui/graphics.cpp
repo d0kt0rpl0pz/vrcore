@@ -221,7 +221,7 @@ GraphicsRows graphics_rows(const Options &o)
             apply();
         },
         0.1f, 1.f, 3.f, [](float v) { return fmt(txt::graphics_eye_value, {{"v", num("%.1f", v)}}); }));
-    rows.profile.push_back(choice(
+    rows.profile.push_back(segmented(
         txt::graphics_foveation_label, {kFoveationNames[0], kFoveationNames[1], kFoveationNames[2], kFoveationNames[3]},
         [] { return gfx.foveation; },
         [](int i) {
@@ -230,7 +230,7 @@ GraphicsRows graphics_rows(const Options &o)
             changed_by_hand();
             apply();
         }));
-    rows.sharpen = choice(
+    rows.sharpen = segmented(
         txt::graphics_sharpen_label, {kSharpenNames[0], kSharpenNames[1], kSharpenNames[2]}, [] { return gfx.sharpen; },
         [](int i) {
             gfx.sharpen = i;

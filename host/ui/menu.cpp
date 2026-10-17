@@ -52,7 +52,7 @@ constexpr float kBoxH = 28 * kC, kBoxPadX = 10 * kC, kBoxGap = 14 * kC;     // a
 constexpr float kTriW = 9 * kC, kTriH = 5 * kC;
 constexpr float kArrowW = 30 * kC, kArrowGap = 8 * kC, kSlotMin = 70 * kC;  // a stepper
 constexpr float kResetH = 24 * kC, kResetPadX = 8 * kC;
-constexpr float kSquare = 11 * kC, kSquareGap = 3 * kC, kToggleGap = 8 * kC;    // a toggle's two squares
+constexpr float kCheck = 15 * kC, kToggleGap = 9 * kC;   // a toggle's box, and the room after it
 constexpr float kLine = 1.5f * kC;                          // a control's outline
 constexpr float kPageW = 12 * kC;                           // a page row's chevron
 constexpr float kReturnH = 36 * kC, kReturnPad = 16 * kC;
@@ -122,7 +122,7 @@ const ImU32 kDot = IM_COL32(255, 255, 255, 255);
 constexpr float kDotPx = 0.008f * Menu::kPxPerM;            // the cursor's radius
 
 // THE ROW KINDS (menu.h): the parts of a row the pointer tells apart
-enum Zone { kNoZone = 0, kDec, kInc, kReset, kConfirm, kValue };
+enum Zone { kNoZone = 0, kDec, kInc, kReset, kConfirm, kValue, kSeg0 = 100 };    // kSeg0 + i: a segmented row's i-th segment
 
 double steady_s()
 {
@@ -480,6 +480,8 @@ void Menu::open()
     if (open_ || !top_ || (hooks_.can_open && !hooks_.can_open())) return;
     open_ = true;
     if (hooks_.on_open) hooks_.on_open();
+    for (auto &a : attached_)
+        if (a.second.on_open) a.second.on_open();
     disarm(page_);
     button_focus_ = false;
     dropdown_ = -1;
@@ -545,7 +547,7 @@ Item toggle(const std::string &label, std::function<bool()> get, std::function<v
     it.kind = Kind::Toggle;
     it.value = [get, on_text, off_text] { return std::string(get() ? on_text : off_text); };
     it.change = [get, set](int) { set(!get()); };
-    it.choices = {on_text, off_text};       // both texts, for "current / other"; not a dropdown (kind is Toggle)
+    it.choices = {on_text, off_text};       // both texts, for the picture (menu.h); not a dropdown (kind is Toggle)
     it.index = [get] { return get() ? 0 : 1; };
     return it;
 }
@@ -567,6 +569,33 @@ Item choice(const std::string &label, std::vector<std::string> labels, std::func
     it.change = [get, set, n](int d) {
         if (n > 0) set(((get() + d) % n + n) % n);
     };
+    return it;
+}
+
+Item segmented(const std::string &label, std::vector<std::string> labels, std::function<int()> get,
+               std::function<void(int)> set)
+{
+    Item it = choice(label, labels, get, set);
+    it.kind = Kind::Segmented;
+    const int n = (int)labels.size();
+    it.change = [get, set, n](int d) {      // stops at the ends: the strip shows where you are
+        const int i = std::min(std::max(get() + d, 0), n - 1);
+        if (n > 0 && i != get()) set(i);
+    };
+    return it;
+}
+
+Item checkbox(const std::string &label, std::function<bool()> get, std::function<void(bool)> set)
+{
+    // on reads nothing and off starts "Off", so the toggle draws the box alone (menu.h THE ROW KINDS)
+    return toggle(label, get, set, "", txt::toggle_off);
+}
+
+Item segmented_toggle(const std::string &label, std::function<bool()> get, std::function<void(bool)> set,
+                      const char *first, const char *second)
+{
+    Item it = segmented(label, {first, second}, [get] { return get() ? 0 : 1; }, [set](int i) { set(i == 0); });
+    it.press = [get, set] { set(!get()); };     // A flips it, as a toggle's does
     return it;
 }
 
@@ -674,7 +703,24 @@ void Menu::place(const Input &in)
     placed_ = true;
 }
 
+void Menu::attach(const char *id, Attached a)
+{
+    for (auto &e : attached_)
+        if (e.first == id) {
+            e.second = std::move(a);
+            return;
+        }
+    attached_.emplace_back(id, std::move(a));
+}
+
 void Menu::update(const Tick &t, const Input &in)
+{
+    step(t, in);
+    for (auto &a : attached_)
+        if (a.second.update) a.second.update(t, in);
+}
+
+void Menu::step(const Tick &t, const Input &in)
 {
     // whatever way this returns, the host learns whether a panel is up (the sim's fake controller: input_host.h)
     struct Report {
@@ -807,6 +853,12 @@ void Menu::update(const Tick &t, const Input &in)
                 }
                 if (step && it.change) {
                     it.change(hover_zone_ == kInc ? +1 : -1);
+                    acted = true;
+                }
+            } else if (it.kind == Kind::Segmented) {
+                const int i = hover_zone_ - kSeg0;
+                if (click && hover_zone_ >= kSeg0 && i < (int)it.choices.size()) {
+                    if (it.pick && !(it.index && it.index() == i)) it.pick(i);
                     acted = true;
                 }
             } else if (click) {
@@ -970,6 +1022,39 @@ float Menu::control(const Item &it, bool worst, float x, float cy, const Ctl *d,
         }
         return bw;
     }
+    if (it.kind == Kind::Segmented) {
+        // one strip, a rule between segments; the current one filled (the key colour, or the bar's ink on the
+        // selected row), the one under the ray lit like a stepper's arrow
+        const int cur = it.index ? it.index() : -1;
+        float sx = x;
+        if (rr) rr->seg.assign(1, x);
+        for (size_t i = 0; i < it.choices.size(); ++i) {
+            const char *t = it.choices[i].c_str();
+            const float w = 2 * kBoxPadX + text_w(valb_f_, t);
+            if (dl) {
+                const bool on = (int)i == cur, hot = d->hot == kSeg0 + (int)i;
+                if (on) dl->AddRectFilled(ImVec2(sx, top), ImVec2(sx + w, bot), sel ? ok : g_key);
+                const ImU32 ink_on = sel ? g_key : ok;
+                put_text(dl, on ? vb : valb_f_, sx + kBoxPadX, cy, on ? ink_on : hot ? (sel ? ok : g_key) : sel ? ok60 : kMuted, t);
+                if (i > 0) dl->AddLine(ImVec2(sx, top), ImVec2(sx, bot), outline, kLine);
+            }
+            sx += w;
+            if (rr) rr->seg.push_back(sx);
+        }
+        if (dl) dl->AddRect(ImVec2(x, top), ImVec2(sx, bot), outline, 0, 0, kLine);
+        // a front's own value that says more than the label ("MPH (Requires Restart)"): the rest follows the strip,
+        // muted, and `reserve` keeps room for Hooks::value_reserve as it does for any value
+        auto trim = [](const std::string &t) { return t.substr(std::min(t.find_first_not_of(' '), t.size())); };
+        std::string note;
+        if (it.value && cur >= 0 && cur < (int)it.choices.size()) {
+            const std::string v = it.value(), &l = it.choices[cur];
+            if (v.size() > l.size() && v.compare(0, l.size(), l) == 0) note = trim(v.substr(l.size()));
+        }
+        float nw = text_w(val_f_, note.c_str());
+        if (it.reserve && worst) nw = std::max(nw, text_w(val_f_, trim(hooks_.value_reserve).c_str()));
+        if (dl && !note.empty()) put_text(dl, val_f_, sx + kToggleGap, cy, sel ? ok60 : kMuted, note.c_str());
+        return sx - x + (nw > 0 ? kToggleGap + nw : 0);
+    }
     if (it.kind == Kind::Stepper) {
         const std::string v = it.value();
         const float slot = std::max({kSlotMin, text_w(valb_f_, it.widest_value.c_str()), text_w(valb_f_, v.c_str())});
@@ -998,35 +1083,49 @@ float Menu::control(const Item &it, bool worst, float x, float cy, const Ctl *d,
         return end - x;
     }
     if (it.kind == Kind::Toggle) {
-        const int idx = it.index ? it.index() : 0;
+        // one box, filled while on. An on / off pair (the off text starts "Off") always reads its on text, so the
+        // box alone says the state; other pairs read the current text. Whatever a front's value adds
+        // after either text ("Off (Requires Restart)") follows in muted ink; a value matching neither is drawn alone.
         const bool two = it.choices.size() >= 2;
+        const bool on = (it.index ? it.index() : 0) == 0;
+        auto starts = [](const std::string &s, const std::string &p) { return s.compare(0, p.size(), p) == 0; };
+        const bool onoff = two && starts(it.choices[1], txt::toggle_off);
+        // the word and note a value is drawn as
+        auto split = [&](const std::string &v, bool state, std::string &word, std::string &note) {
+            word = v, note.clear();
+            if (!two) return;
+            const std::string &mine = it.choices[state ? 0 : 1], &other = it.choices[state ? 1 : 0];
+            const std::string *m = starts(v, mine) ? &mine : starts(v, other) ? &other : nullptr;
+            if (!m) return;
+            word = onoff ? it.choices[0] : *m;
+            note = v.substr(m->size());
+        };
+        auto width = [&](const std::string &v, bool state) {
+            std::string w, n;
+            split(v, state, w, n);
+            return text_w(valb_f_, w.c_str()) + text_w(val_f_, n.c_str());
+        };
+        const float sq = kCheck + kToggleGap;
         const std::string cur = it.value();
-        const bool replaced = !two || idx < 0 || idx > 1 || cur != it.choices[idx];
-        const float sq = 2 * kSquare + kSquareGap + kToggleGap;
         float tw = 0;
         if (worst) {
-            if (two)
-                for (int a = 0; a < 2; ++a)
-                    tw = std::max(tw, text_w(valb_f_, it.choices[a].c_str()) + text_w(val_f_, (" / " + it.choices[1 - a]).c_str()));
-            if (it.reserve) {                   // a replaced value, or either text with the reserve
-                tw = std::max(tw, text_w(valb_f_, (cur + hooks_.value_reserve).c_str()));
-                for (const std::string &c : it.choices) tw = std::max(tw, text_w(valb_f_, (c + hooks_.value_reserve).c_str()));
+            tw = width(cur, on);
+            for (int a = 0; two && a < 2; ++a) {
+                tw = std::max(tw, width(it.choices[a], a == 0));
+                if (it.reserve) tw = std::max(tw, width(it.choices[a] + hooks_.value_reserve, a == 0));
             }
+            if (it.reserve) tw = std::max(tw, width(cur + hooks_.value_reserve, on));
         } else {
-            tw = text_w(valb_f_, cur.c_str());
-            if (!replaced) tw += text_w(val_f_, (" / " + it.choices[1 - idx]).c_str());
+            tw = width(cur, on);
         }
         if (dl) {
-            for (int i = 0; i < 2; ++i) {
-                const float sx = x + (float)i * (kSquare + kSquareGap);
-                const ImVec2 a(sx, cy - kSquare / 2), b(sx + kSquare, cy + kSquare / 2);
-                if (i == (idx == 0 ? 0 : 1)) dl->AddRectFilled(a, b, sel ? ok : g_heading);
-                dl->AddRect(a, b, sel ? ok : kMuted, 0, 0, kLine);
-            }
-            float tx = x + sq;
-            put_text(dl, vb, tx, cy, ink, cur.c_str());
-            if (!replaced)
-                put_text(dl, val_f_, tx + text_w(valb_f_, cur.c_str()), cy, sel ? ok60 : kMuted, (" / " + it.choices[1 - idx]).c_str());
+            const ImVec2 a(x, cy - kCheck / 2), b(x + kCheck, cy + kCheck / 2);
+            if (on) dl->AddRectFilled(a, b, sel ? ok : g_heading);
+            dl->AddRect(a, b, sel ? ok : on ? g_heading : kMuted, 0, 0, kLine);
+            std::string w, n;
+            split(cur, on, w, n);
+            put_text(dl, vb, x + sq, cy, ink, w.c_str());
+            if (!n.empty()) put_text(dl, val_f_, x + sq + text_w(valb_f_, w.c_str()), cy, sel ? ok60 : kMuted, n.c_str());
         }
         return sq + tw;
     }
@@ -1365,14 +1464,15 @@ void Menu::draw_panel(ImDrawList *dl, float ox, const Plan &pl, float w, float h
     }
 }
 
-// A click where the ray is would do something: a dropdown's choice, a row that is not a stepper, or a stepper's
-// half or Reset. The cursor dot and the ray take their key colour from it.
+// A click where the ray is would do something: a dropdown's choice, a row that is not a stepper or a strip, or a
+// stepper's half or Reset, or a segment. The cursor dot and the ray take their key colour from it.
 bool Menu::pointing_at_control() const
 {
     if (showing_message_) return msg_hover_;
     if (drop_hover_ >= 0) return true;
     if (hover_row_ < 0 || hover_row_ >= (int)visible_.size()) return false;
-    return visible_[hover_row_]->kind != Kind::Stepper || hover_zone_ != kNoZone;
+    const Kind k = visible_[hover_row_]->kind;
+    return (k != Kind::Stepper && k != Kind::Segmented) || hover_zone_ != kNoZone;
 }
 
 // The pointing hand's ray against the quads prepare hung (the nearest one in front of it), into that layer's
@@ -1449,6 +1549,9 @@ void Menu::point(const Input &in, bool &click)
         if (it.kind == Kind::Stepper && r.dec0 >= 0 && hit_x_ >= r.dec0 && hit_x_ < r.inc1)
             hover_zone_ = hit_x_ < (r.dec0 + r.inc1) / 2 ? kDec : kInc;
         if (it.kind == Kind::Stepper && r.reset0 >= 0 && hit_x_ >= r.reset0 && hit_x_ < r.reset1) hover_zone_ = kReset;
+        if (it.kind == Kind::Segmented)
+            for (size_t i = 0; i + 1 < r.seg.size(); ++i)
+                if (hit_x_ >= r.seg[i] && hit_x_ < r.seg[i + 1]) hover_zone_ = kSeg0 + (int)i;
         if (it.kind == Kind::Confirm && r.conf0 >= 0 && hit_x_ >= r.conf0 && hit_x_ < r.conf1) hover_zone_ = kConfirm;
     }
     if (hover_row_ >= 0 && hover_row_ != was) {
